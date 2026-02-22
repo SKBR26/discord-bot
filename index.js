@@ -9,19 +9,27 @@ const {
 } = require('discord.js');
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds
-  ]
+  intents: [GatewayIntentBits.Guilds]
 });
 
-const CATEGORY_ID = "1474912707357577236";
-const CHANNEL_ID = "1474948831882772500";
+const CATEGORY_ID = "1474912707357577236"; // ID da categoria de tickets
+const CHANNEL_ID = "1474948831882772500";  // ID do canal do painel
 const TOKEN = process.env.TOKEN;
 
 client.once('ready', async () => {
   console.log('Bot online!');
 
   const channel = await client.channels.fetch(CHANNEL_ID);
+
+  // Verifica se já existe painel recente
+  const mensagens = await channel.messages.fetch({ limit: 10 });
+
+  const jaExiste = mensagens.find(msg =>
+    msg.author.id === client.user.id &&
+    msg.components.length > 0
+  );
+
+  if (jaExiste) return; // Se já existir, não envia outro
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -71,9 +79,4 @@ client.on('interactionCreate', async interaction => {
   await interaction.reply({ content: 'Seu ticket foi criado!', ephemeral: true });
 });
 
-
 client.login(TOKEN);
-
-
-
-
