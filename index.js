@@ -15,7 +15,7 @@ const client = new Client({
 });
 
 const CATEGORY_ID = "1474912707357577236";
-const CHANNEL_ID = "1474925313216610487";
+const CHANNEL_ID = "1474948831882772500";
 const TOKEN = process.env.TOKEN;
 
 client.once('ready', async () => {
@@ -70,5 +70,6 @@ client.on('interactionCreate', async interaction => {
   await canal.send(`📩 Ticket de **${tipo}** aberto por ${interaction.user}`);
   await interaction.reply({ content: 'Seu ticket foi criado!', ephemeral: true });
 });
+
 
 client.login(TOKEN);
