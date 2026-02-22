@@ -41,7 +41,7 @@ client.once('ready', async () => {
   );
 
   await channel.send({
-    content: '🎫 **Sistema de Atendimento**\nPara que possamos ajudar, selecione o motivo abaixo:',
+    content: '🎫 **Sistema de Tickets**\nPara que possamos ajudar, selecione o motivo abaixo:',
     components: [row]
   });
 });
@@ -73,5 +73,6 @@ client.on('interactionCreate', async interaction => {
 
 
 client.login(TOKEN);
+
 
 
