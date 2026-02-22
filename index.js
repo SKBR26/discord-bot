@@ -12,8 +12,9 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-const CATEGORY_ID = "1474912707357577236"; // ID da categoria de tickets
+const CATEGORY_ID = "1474912707357577236"; // ID da categoria
 const CHANNEL_ID = "1474948831882772500";  // ID do canal do painel
+const MOD_ROLE_ID = "1474961654793109726"; // ID do cargo Moderação
 const TOKEN = process.env.TOKEN;
 
 client.once('ready', async () => {
@@ -21,7 +22,7 @@ client.once('ready', async () => {
 
   const channel = await client.channels.fetch(CHANNEL_ID);
 
-  // Verifica se já existe painel recente
+  // Verifica se já existe painel para não duplicar
   const mensagens = await channel.messages.fetch({ limit: 10 });
 
   const jaExiste = mensagens.find(msg =>
@@ -29,7 +30,7 @@ client.once('ready', async () => {
     msg.components.length > 0
   );
 
-  if (jaExiste) return; // Se já existir, não envia outro
+  if (jaExiste) return;
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -71,12 +72,22 @@ client.on('interactionCreate', async interaction => {
       {
         id: interaction.user.id,
         allow: [PermissionsBitField.Flags.ViewChannel]
+      },
+      {
+        id: MOD_ROLE_ID,
+        allow: [PermissionsBitField.Flags.ViewChannel]
       }
     ]
   });
 
-  await canal.send(`📩 Ticket de **${tipo}** aberto por ${interaction.user}`);
-  await interaction.reply({ content: 'Seu ticket foi criado!', ephemeral: true });
+  await canal.send({
+    content: `📩 Ticket de **${tipo}** aberto por ${interaction.user}\n\n<@&${MOD_ROLE_ID}>`
+  });
+
+  await interaction.reply({
+    content: '✅ Seu ticket foi criado!',
+    ephemeral: true
+  });
 });
 
 client.login(TOKEN);
