@@ -58,8 +58,7 @@ client.once("ready", async () => {
   );
 
   await channel.send({
-    content:
-      "🎫 **Sistema de Tickets**\nSelecione abaixo o motivo do atendimento:",
+    content: "🎫 **Sistema de Tickets**\nSelecione o motivo do atendimento:",
     components: [row]
   });
 });
@@ -77,16 +76,17 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // ✅ Para tickets de DOAÇÃO, só o OWNER pode fechar
-    if (interaction.channel.topic === "doacao") {
+    // 🔐 DOAÇÃO → só OWNER fecha
+    if (interaction.channel.name.startsWith("doacao-")) {
       if (interaction.user.id !== OWNER_ID) {
         return interaction.reply({
           content: "❌ Apenas o OWNER pode encerrar tickets de doação.",
           ephemeral: true
         });
       }
-    } else {
-      // ✅ Para outros tickets, apenas mods podem fechar
+    } 
+    // 🔐 OUTROS → só MOD
+    else {
       if (!interaction.member.roles.cache.has(MOD_ROLE_ID)) {
         return interaction.reply({
           content: "❌ Apenas a moderação pode encerrar o ticket.",
@@ -129,7 +129,6 @@ client.on("interactionCreate", async (interaction) => {
   try {
     const allChannels = await interaction.guild.channels.fetch();
 
-    // ✅ Se o usuário já tem um ticket em aberto (qualquer tipo)
     const jaTem = allChannels.find(
       (c) =>
         c.type === ChannelType.GuildText &&
@@ -153,7 +152,7 @@ client.on("interactionCreate", async (interaction) => {
       nomeCanal = `${tipo}-${interaction.user.id}`;
     }
 
-    // ✅ Permissões dinâmicas (DOAÇÃO só OWNER + usuário)
+    /* ========= PERMISSÕES ========= */
     const permissionOverwrites = [
       {
         id: interaction.guild.id,
@@ -177,6 +176,7 @@ client.on("interactionCreate", async (interaction) => {
       }
     ];
 
+    // 💝 DOAÇÃO → NÃO adiciona MOD_ROLE
     if (tipo === "doacao") {
       permissionOverwrites.push({
         id: OWNER_ID,
@@ -186,7 +186,9 @@ client.on("interactionCreate", async (interaction) => {
           PermissionsBitField.Flags.ReadMessageHistory
         ]
       });
-    } else {
+    } 
+    // 🛑 DENÚNCIA / ❓ DÚVIDAS → MOD vê
+    else {
       permissionOverwrites.push({
         id: MOD_ROLE_ID,
         allow: [
@@ -203,7 +205,6 @@ client.on("interactionCreate", async (interaction) => {
       name: nomeCanal,
       type: ChannelType.GuildText,
       parent: CATEGORY_ID,
-      // ✅ topic do canal: guarda o ID do user (para checar ticket aberto)
       topic: interaction.user.id,
       permissionOverwrites
     });
@@ -216,12 +217,9 @@ client.on("interactionCreate", async (interaction) => {
     );
 
     const mensagens = {
-      denuncia:
-        "🛑 **Denúncia**\nDescreva o ocorrido e envie provas (prints/vídeos).",
-      doacao:
-        "💝 **Doação**\nInforme o valor e o método de pagamento.\n\n⚠️ *Este canal é privado (somente você e o Owner podem ver).*",
-      duvidas:
-        "❓ **Dúvidas**\nExplique sua dúvida com o máximo de detalhes."
+      denuncia: "🛑 **Denúncia**\nEnvie provas (prints/vídeos) e descrição.",
+      doacao: "💝 **Doação**\nInforme valor e método.\n🔐 *Somente você e o Owner podem ver este canal.*",
+      duvidas: "❓ **Dúvidas**\nExplique sua dúvida detalhadamente."
     };
 
     await canal.send({
