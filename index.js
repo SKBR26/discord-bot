@@ -12,17 +12,17 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-const CATEGORY_ID = "1474912707357577236"; // ID da categoria
-const CHANNEL_ID = "1474948831882772500";  // ID do canal do painel
-const MOD_ROLE_ID = "1474961654793109726"; // ID do cargo Moderação
+const CATEGORY_ID = "1474912707357577236";
+const CHANNEL_ID = "1474948831882772500";
+const MOD_ROLE_ID = "1474961654793109726";
 const TOKEN = process.env.TOKEN;
 
 client.once('ready', async () => {
-  console.log('Bot online!');
+  console.log(`✅ Bot online como ${client.user.tag}`);
 
-  const channel = await client.channels.fetch(CHANNEL_ID);
+  const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
+  if (!channel) return console.log("❌ Canal do painel não encontrado.");
 
-  // Verifica se já existe painel para não duplicar
   const mensagens = await channel.messages.fetch({ limit: 10 });
 
   const jaExiste = mensagens.find(msg =>
@@ -50,7 +50,7 @@ client.once('ready', async () => {
   );
 
   await channel.send({
-    content: '🎫 **Sistema de Tickets**\nPara que possamos ajudar, selecione o motivo abaixo:',
+    content: '🎫 **Sistema de Tickets**\nSelecione abaixo o motivo do seu atendimento:',
     components: [row]
   });
 });
@@ -58,10 +58,61 @@ client.once('ready', async () => {
 client.on('interactionCreate', async interaction => {
   if (!interaction.isButton()) return;
 
+  /* ================================
+     🔒 BOTÃO DE FECHAR TICKET
+  ================================== */
+  if (interaction.customId === 'fechar_ticket') {
+
+    if (interaction.channel.parentId !== CATEGORY_ID) {
+      return interaction.reply({
+        content: "❌ Este botão só funciona em tickets.",
+        ephemeral: true
+      });
+    }
+
+    if (!interaction.member.roles.cache.has(MOD_ROLE_ID)) {
+      return interaction.reply({
+        content: "❌ Apenas a moderação pode encerrar o ticket.",
+        ephemeral: true
+      });
+    }
+
+    await interaction.reply({
+      content: "🔒 Encerrando ticket em 3 segundos...",
+      ephemeral: true
+    });
+
+    setTimeout(() => {
+      interaction.channel.delete().catch(() => null);
+    }, 3000);
+
+    return;
+  }
+
+  /* ================================
+     🎟️ CRIAÇÃO DE TICKET
+  ================================== */
+
   const tipo = interaction.customId;
 
+  const jaTem = interaction.guild.channels.cache.find(c =>
+    c.parentId === CATEGORY_ID &&
+    c.name.includes(interaction.user.username.toLowerCase())
+  );
+
+  if (jaTem) {
+    return interaction.reply({
+      content: "❌ Você já possui um ticket aberto.",
+      ephemeral: true
+    });
+  }
+
+  const nomeCanal = `${tipo}-${interaction.user.username}`
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '');
+
   const canal = await interaction.guild.channels.create({
-    name: `${tipo}-${interaction.user.username}`,
+    name: nomeCanal,
     type: ChannelType.GuildText,
     parent: CATEGORY_ID,
     permissionOverwrites: [
@@ -80,12 +131,20 @@ client.on('interactionCreate', async interaction => {
     ]
   });
 
+  const closeRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('fechar_ticket')
+      .setLabel('🔒 Encerrar Ticket')
+      .setStyle(ButtonStyle.Secondary)
+  );
+
   await canal.send({
-    content: `📩 Ticket de **${tipo}** aberto por ${interaction.user}\n\n<@&${MOD_ROLE_ID}>`
+    content: `📩 Ticket de **${tipo}** aberto por ${interaction.user}\n\n<@&${MOD_ROLE_ID}>`,
+    components: [closeRow]
   });
 
   await interaction.reply({
-    content: '✅ Seu ticket foi criado!',
+    content: "✅ Seu ticket foi criado!",
     ephemeral: true
   });
 });
