@@ -16,7 +16,7 @@ const client = new Client({
 const CATEGORY_ID = "1474912707357577236";
 const CHANNEL_ID  = "1474948831882772500";
 const MOD_ROLE_ID = "1474961654793109726";
-const OWNER_ROLE_ID = "1401261879292198978"; // só para ver/ser marcado
+const OWNER_ROLE_ID = "1401261879292198978"; // apenas para ver/ser marcado em doação
 const TOKEN = process.env.TOKEN;
 /* ========================================== */
 
@@ -27,7 +27,10 @@ const COOLDOWN_MS = 2500;
 
 /* ========= helpers ========= */
 function normalizeId(str) {
-  return String(str || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return String(str || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 }
 
 function mapTipo(customId) {
@@ -78,7 +81,6 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.channel?.parentId !== CATEGORY_ID) {
       return interaction.reply({ content: "❌ Este botão só funciona dentro de um ticket.", ephemeral: true });
     }
-
     await interaction.reply({ content: "🔒 Encerrando ticket em 2 segundos...", ephemeral: true });
     setTimeout(() => interaction.channel.delete().catch(() => {}), 2000);
     return;
@@ -170,10 +172,14 @@ client.on("interactionCreate", async (interaction) => {
       new ButtonBuilder().setCustomId(CLOSE_ID).setLabel("🔒 Encerrar Ticket").setStyle(ButtonStyle.Secondary)
     );
 
+    // 🔥 TEXTOS FINAIS
     const mensagens = {
-      denuncia: "🛑 **Denúncia**\nEnvie provas (prints/vídeos) e descrição.",
-      doacao:  "💝 **Doação**\n📎 Envie o comprovante e aguarde o staff responsável.",
-      duvidas: "❓ **Dúvidas**\nExplique sua dúvida detalhadamente."
+      denuncia:
+        "🛑 **Denúncia**\nEnvie as provas (prints ou vídeo) e descreva o ocorrido por gentileza.\n\n⏰ **Prazo de retorno: 24h a 48h.**",
+      doacao:
+        "💝 **Doação**\n📎 Envie o comprovante e aguarde o staff responsável.",
+      duvidas:
+        "❓ **Dúvidas**\nExplique sua dúvida detalhadamente."
     };
 
     if (tipo === "doacao") {
