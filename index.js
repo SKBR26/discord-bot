@@ -1,21 +1,27 @@
-const { 
-  Client, 
-  GatewayIntentBits, 
-  ChannelType, 
-  PermissionsBitField, 
-  ActionRowBuilder, 
-  ButtonBuilder, 
-  ButtonStyle 
+const {
+  Client,
+  GatewayIntentBits,
+  ChannelType,
+  PermissionsBitField,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle
 } = require('discord.js');
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-const CATEGORY_ID = "1474912707357577236";
-const CHANNEL_ID = "1474948831882772500";
-const MOD_ROLE_ID = "1474961654793109726";
+const CATEGORY_ID = "1474912707357577236"; // categoria dos tickets
+const CHANNEL_ID  = "1474948831882772500"; // canal do painel
+const MOD_ROLE_ID = "1474961654793109726"; // cargo moderação
 const TOKEN = process.env.TOKEN;
+
+// Tipos permitidos no painel (SÓ esses criam ticket)
+const TICKET_TYPES = new Set(["denuncia", "compra", "duvidas"]);
+
+// CustomId exclusivo do botão de fechar (não conflita com types)
+const CLOSE_ID = "ticket_close";
 
 client.once('ready', async () => {
   console.log(`✅ Bot online como ${client.user.tag}`);
@@ -24,12 +30,10 @@ client.once('ready', async () => {
   if (!channel) return console.log("❌ Canal do painel não encontrado.");
 
   const mensagens = await channel.messages.fetch({ limit: 10 });
-
   const jaExiste = mensagens.find(msg =>
-    msg.author.id === client.user.id &&
-    msg.components.length > 0
+    msg.author?.id === client.user.id &&
+    msg.components?.length > 0
   );
-
   if (jaExiste) return;
 
   const row = new ActionRowBuilder().addComponents(
@@ -50,29 +54,37 @@ client.once('ready', async () => {
   );
 
   await channel.send({
-    content: '🎫 **Sistema de Tickets**\nSelecione abaixo o motivo do seu atendimento:',
+    content: '🎫 **Sistema de Tickets**\nPara que possamos ajudar, selecione o motivo abaixo:',
     components: [row]
   });
 });
 
-client.on('interactionCreate', async interaction => {
+client.on('interactionCreate', async (interaction) => {
   if (!interaction.isButton()) return;
 
-  /* =========================
-     🔒 FECHAR TICKET
-  ========================== */
-  if (interaction.customId === 'fechar_ticket') {
+  // Garante lista completa no cache (evita falhas ao detectar ticket já aberto)
+  await interaction.guild.channels.fetch().catch(() => null);
 
+  /* =========================
+     🔒 FECHAR TICKET (NÃO CRIA OUTRO)
+  ========================== */
+  if (interaction.customId === CLOSE_ID) {
+    // Só pode fechar se estiver dentro da categoria de tickets
     if (interaction.channel.parentId !== CATEGORY_ID) {
       return interaction.reply({
-        content: "❌ Este botão só funciona em tickets.",
+        content: "❌ Este botão só funciona dentro de um ticket.",
         ephemeral: true
       });
     }
 
-    if (!interaction.member.roles.cache.has(MOD_ROLE_ID)) {
+    const donoId = interaction.channel.topic; // ID do dono do ticket
+    const isMod = interaction.member.roles.cache.has(MOD_ROLE_ID);
+    const isDono = donoId && interaction.user.id === donoId;
+
+    // Pode ajustar: aqui deixei MOD OU DONO fechar
+    if (!isMod && !isDono) {
       return interaction.reply({
-        content: "❌ Apenas a moderação pode encerrar o ticket.",
+        content: "❌ Apenas o dono do ticket ou a moderação pode encerrar.",
         ephemeral: true
       });
     }
@@ -90,12 +102,19 @@ client.on('interactionCreate', async interaction => {
   }
 
   /* =========================
-     🎟️ CRIAR TICKET
+     🎟️ CRIAR TICKET (SÓ se for um tipo permitido)
   ========================== */
-
   const tipo = interaction.customId;
 
-  // 🔥 Verifica pelo ID do usuário salvo no topic
+  // Se não for um tipo do painel, IGNORA (isso impede criar ticket por “fechar_ticket” ou qualquer outro)
+  if (!TICKET_TYPES.has(tipo)) {
+    return interaction.reply({
+      content: "❌ Botão inválido.",
+      ephemeral: true
+    }).catch(() => null);
+  }
+
+  // 1 ticket por usuário (guardado no topic)
   const jaTem = interaction.guild.channels.cache.find(c =>
     c.parentId === CATEGORY_ID &&
     c.topic === interaction.user.id
@@ -111,13 +130,13 @@ client.on('interactionCreate', async interaction => {
   const nomeCanal = `${tipo}-${interaction.user.username}`
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, '')
-    .slice(0, 20);
+    .slice(0, 80);
 
   const canal = await interaction.guild.channels.create({
     name: nomeCanal,
     type: ChannelType.GuildText,
     parent: CATEGORY_ID,
-    topic: interaction.user.id, // salva ID do dono
+    topic: interaction.user.id, // salva o dono do ticket aqui
     permissionOverwrites: [
       {
         id: interaction.guild.id,
@@ -136,7 +155,7 @@ client.on('interactionCreate', async interaction => {
 
   const closeRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId('fechar_ticket')
+      .setCustomId(CLOSE_ID)
       .setLabel('🔒 Encerrar Ticket')
       .setStyle(ButtonStyle.Secondary)
   );
