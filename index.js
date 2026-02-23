@@ -5,8 +5,7 @@ const {
   PermissionsBitField,
   ActionRowBuilder,
   ButtonBuilder,
-  ButtonStyle,
-  AllowedMentions
+  ButtonStyle
 } = require("discord.js");
 
 const client = new Client({
@@ -15,18 +14,25 @@ const client = new Client({
 
 /* ================= CONFIG ================= */
 const CATEGORY_ID = "1474912707357577236";
-const CHANNEL_ID = "1474948831882772500";
+const CHANNEL_ID  = "1474948831882772500";
 const MOD_ROLE_ID = "1474961654793109726";
 
-// ✅ AQUI É O ID DO CARGO "Owner" (não do usuário!)
+// ✅ ID DO CARGO Owner (para VER/ser marcado em doação). Não é pra fechar.
 const OWNER_ROLE_ID = "1401261879292198978";
 
 const TOKEN = process.env.TOKEN;
 /* ========================================== */
 
 const CLOSE_ID = "ticket_close";
+
+// anti clique duplo (ticket)
 const creating = new Set();
 
+// cooldown simples por usuário
+const cooldown = new Map(); // userId -> timestamp(ms)
+const COOLDOWN_MS = 2500;
+
+/* ========= Normalização / compatibilidade ========= */
 function normalizeId(str) {
   return String(str || "")
     .toLowerCase()
@@ -43,101 +49,122 @@ function mapTipo(customId) {
   return null;
 }
 
+/* ========= Painel ========= */
+function buildPanelRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("denuncia").setLabel("🛑 Denúncia").setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId("doacao").setLabel("💝 Doação").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("duvidas").setLabel("❓ Dúvidas").setStyle(ButtonStyle.Primary)
+  );
+}
+
+const PANEL_TEXT = "🎫 **Sistema de Tickets**\nSelecione o motivo do atendimento:";
+
+async function ensureSinglePanel(panelChannel) {
+  const msgs = await panelChannel.messages.fetch({ limit: 100 });
+
+  const botPanels = msgs
+    .filter((m) => m.author?.id === client.user.id && m.components?.length > 0)
+    .sort((a, b) => b.createdTimestamp - a.createdTimestamp);
+
+  const keep = botPanels.first(); // mais recente
+
+  // apaga extras
+  const extras = botPanels.filter((m) => m.id !== keep?.id);
+  for (const [, m] of extras) await m.delete().catch(() => null);
+
+  if (keep) {
+    await keep.edit({ content: PANEL_TEXT, components: [buildPanelRow()] }).catch(() => null);
+    return keep;
+  }
+
+  return panelChannel.send({ content: PANEL_TEXT, components: [buildPanelRow()] });
+}
+
+/* ================= BOT READY ================= */
 client.once("ready", async () => {
   console.log(`✅ Bot online como ${client.user.tag}`);
 
   const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
   if (!channel) return console.log("❌ Canal do painel não encontrado.");
 
-  // Apaga painéis antigos do bot e cria novo
-  const msgs = await channel.messages.fetch({ limit: 100 }).catch(() => null);
-  if (!msgs) return console.log("❌ Não consegui buscar mensagens do painel.");
-
-  const paineisDoBot = msgs.filter(
-    (m) => m.author?.id === client.user.id && m.components?.length > 0
-  );
-  for (const [, m] of paineisDoBot) await m.delete().catch(() => null);
-
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("denuncia").setLabel("🛑 Denúncia").setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId("doacao").setLabel("💝 Doação").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId("duvidas").setLabel("❓ Dúvidas").setStyle(ButtonStyle.Primary)
-  );
-
-  await channel.send({
-    content: "🎫 **Sistema de Tickets**\nSelecione o motivo do atendimento:",
-    components: [row]
+  await ensureSinglePanel(channel).catch((err) => {
+    console.log("❌ Erro ao garantir painel único:", err?.message || err);
   });
 
-  console.log("✅ Painel recriado.");
+  console.log("✅ Painel ok (único e atualizado).");
 });
 
+/* ================= INTERAÇÕES ================= */
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
 
-  /* ========= FECHAR TICKET ========= */
+  /* ========= FECHAR TICKET (QUALQUER UM) ========= */
   if (interaction.customId === CLOSE_ID) {
-    if (interaction.channel.parentId !== CATEGORY_ID) {
-      return interaction.reply({ content: "❌ Este botão só funciona dentro de um ticket.", ephemeral: true });
+    if (interaction.channel?.parentId !== CATEGORY_ID) {
+      return interaction.reply({
+        content: "❌ Este botão só funciona dentro de um ticket.",
+        ephemeral: true
+      });
     }
 
-    const isDoacao = interaction.channel.name?.startsWith("doacao-");
-
-    // ✅ DOAÇÃO: quem tem o CARGO Owner pode fechar
-    if (isDoacao) {
-      const temCargoOwner = interaction.member.roles.cache.has(OWNER_ROLE_ID);
-      if (!temCargoOwner) {
-        return interaction.reply({
-          content: "❌ Apenas o cargo **Owner** pode encerrar tickets de doação.",
-          ephemeral: true
-        });
-      }
-    } else {
-      // Outros: só moderação
-      if (!interaction.member.roles.cache.has(MOD_ROLE_ID)) {
-        return interaction.reply({ content: "❌ Apenas a moderação pode encerrar o ticket.", ephemeral: true });
-      }
-    }
-
-    await interaction.reply({ content: "🔒 Encerrando ticket em 2 segundos...", ephemeral: true });
+    // ✅ Agora qualquer um pode fechar
+    await interaction.reply({
+      content: "🔒 Encerrando ticket em 2 segundos...",
+      ephemeral: true
+    });
 
     setTimeout(() => {
-      interaction.channel.delete().catch((err) => console.log("❌ Erro ao deletar:", err?.message || err));
+      interaction.channel.delete().catch((err) => {
+        console.log("❌ Erro ao deletar canal:", err?.message || err);
+      });
     }, 2000);
 
     return;
   }
 
   /* ========= CRIAR TICKET ========= */
-  const tipo = mapTipo(interaction.customId);
+  const now = Date.now();
+  const last = cooldown.get(interaction.user.id) || 0;
+  if (now - last < COOLDOWN_MS) {
+    return interaction.reply({ content: "⏳ Aguarde um instante...", ephemeral: true }).catch(() => null);
+  }
+  cooldown.set(interaction.user.id, now);
 
+  const tipo = mapTipo(interaction.customId);
   if (!tipo) {
     console.log("❌ Botão inválido customId:", interaction.customId);
-    return interaction.reply({ content: "❌ Botão inválido.", ephemeral: true });
+    return interaction.reply({ content: "❌ Botão inválido.", ephemeral: true }).catch(() => null);
   }
 
   if (creating.has(interaction.user.id)) {
-    return interaction.reply({ content: "⏳ Aguarde, estou criando seu ticket...", ephemeral: true });
+    return interaction.reply({ content: "⏳ Aguarde, estou criando seu ticket...", ephemeral: true }).catch(() => null);
   }
   creating.add(interaction.user.id);
 
   try {
     const allChannels = await interaction.guild.channels.fetch();
 
+    // 1 ticket por usuário na categoria
     const jaTem = allChannels.find(
       (c) => c.type === ChannelType.GuildText && c.parentId === CATEGORY_ID && c.topic === interaction.user.id
     );
 
     if (jaTem) {
-      return interaction.reply({ content: `❌ Você já tem um ticket aberto: ${jaTem}`, ephemeral: true });
+      return interaction.reply({
+        content: `❌ Você já tem um ticket aberto: ${jaTem}`,
+        ephemeral: true
+      }).catch(() => null);
     }
 
     let nomeCanal = `${tipo}-${interaction.user.username || interaction.user.id}`
       .toLowerCase()
       .replace(/[^a-z0-9-]/g, "")
       .slice(0, 80);
+
     if (nomeCanal.length < 3) nomeCanal = `${tipo}-${interaction.user.id}`;
 
+    /* ========= PERMISSÕES ========= */
     const permissionOverwrites = [
       { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
       {
@@ -153,16 +180,19 @@ client.on("interactionCreate", async (interaction) => {
         allow: [
           PermissionsBitField.Flags.ViewChannel,
           PermissionsBitField.Flags.SendMessages,
-          PermissionsBitField.Flags.ReadMessageHistory
+          PermissionsBitField.Flags.ReadMessageHistory,
+          PermissionsBitField.Flags.ManageChannels
         ]
       }
     ];
 
     if (tipo === "doacao") {
-      // moderação NÃO vê
-      permissionOverwrites.push({ id: MOD_ROLE_ID, deny: [PermissionsBitField.Flags.ViewChannel] });
-
-      // ✅ cargo Owner vê
+      // doação: mod não vê
+      permissionOverwrites.push({
+        id: MOD_ROLE_ID,
+        deny: [PermissionsBitField.Flags.ViewChannel]
+      });
+      // cargo owner vê
       permissionOverwrites.push({
         id: OWNER_ROLE_ID,
         allow: [
@@ -172,6 +202,7 @@ client.on("interactionCreate", async (interaction) => {
         ]
       });
     } else {
+      // outros: mod vê
       permissionOverwrites.push({
         id: MOD_ROLE_ID,
         allow: [
@@ -198,14 +229,14 @@ client.on("interactionCreate", async (interaction) => {
 
     const mensagens = {
       denuncia: "🛑 **Denúncia**\nEnvie provas (prints/vídeos) e descrição.",
-      doacao: "💝 **Doação**\nInforme valor e método.\n🔐 *Somente você e o cargo Owner podem ver este canal.*",
+      doacao:  "💝 **Doação**\nInforme valor e método.\n🔐 *Somente você e o cargo Owner podem ver este canal.*",
       duvidas: "❓ **Dúvidas**\nExplique sua dúvida detalhadamente."
     };
 
     if (tipo === "doacao") {
       await canal.send({
         content: `📩 **Ticket de DOAÇÃO** aberto por ${interaction.user}\n\n${mensagens.doacao}\n\n👑 <@&${OWNER_ROLE_ID}>`,
-        allowedMentions: { roles: [OWNER_ROLE_ID] }, // garante que marca o cargo
+        allowedMentions: { roles: [OWNER_ROLE_ID] },
         components: [closeRow]
       });
     } else {
@@ -216,10 +247,21 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    await interaction.reply({ content: `✅ Seu ticket foi criado: ${canal}`, ephemeral: true });
+    await interaction.reply({
+      content: `✅ Seu ticket foi criado: ${canal}`,
+      ephemeral: true
+    }).catch(() => null);
+
+  } catch (err) {
+    console.log("❌ Erro ao criar ticket:", err?.message || err);
+    await interaction.reply({
+      content: "❌ Deu erro ao criar o ticket. Verifique permissões do bot.",
+      ephemeral: true
+    }).catch(() => null);
   } finally {
     creating.delete(interaction.user.id);
   }
 });
 
+/* ================= LOGIN ================= */
 client.login(TOKEN);
