@@ -26,14 +26,38 @@ const TOKEN = process.env.TOKEN;
 const CLOSE_ID = "ticket_close";
 const creating = new Set();
 
-// ✅ NÃO mexe no painel: aceita "compra" (painel antigo) e "doacao" (novo)
-const TICKET_TYPES = new Set(["denuncia", "duvidas", "doacao", "compra"]);
+/**
+ * Normaliza customId:
+ * - lower
+ * - remove acentos (doação -> doacao)
+ */
+function normalizeId(str) {
+  return String(str || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, ""); // remove diacríticos
+}
+
+/**
+ * Aceita ids antigos e novos:
+ * - compra -> doacao
+ * - doação -> doacao
+ * - doacao -> doacao
+ */
+function mapTipo(customId) {
+  const id = normalizeId(customId);
+  if (id === "compra") return "doacao";
+  if (id === "doacao") return "doacao";
+  if (id === "denuncia") return "denuncia";
+  if (id === "duvidas") return "duvidas";
+  return null;
+}
 
 /* ================= BOT READY ================= */
 client.once("ready", async () => {
   console.log(`✅ Bot online como ${client.user.tag}`);
 
-  // ✅ Mantido igual: se o painel já existe, NÃO manda outro (não mexe no painel)
+  // ✅ Não mexe no painel: se já existir mensagem com botões, não envia outra
   const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
   if (!channel) return console.log("❌ Canal do painel não encontrado.");
 
@@ -45,8 +69,7 @@ client.once("ready", async () => {
   );
   if (jaExiste) return;
 
-  // Se algum dia você quiser que o bot crie painel novo automaticamente,
-  // deixa esse trecho. Se NÃO quiser, pode apagar essa parte depois.
+  // (Só cria painel se não existir nenhum do bot)
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("denuncia")
@@ -81,8 +104,10 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // 💝 Doação: só OWNER fecha
+    // Detecta doação por nome do canal (doacao-...)
     const isDoacao = interaction.channel.name?.startsWith("doacao-");
+
+    // 💝 Doação: só OWNER fecha
     if (isDoacao) {
       if (interaction.user.id !== OWNER_ID) {
         return interaction.reply({
@@ -113,14 +138,9 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   /* ========= CRIAR TICKET ========= */
-  const tipoRaw = interaction.customId;
+  const tipo = mapTipo(interaction.customId);
 
-  // ✅ Conversão global SEM mexer no painel:
-  // se o painel mandar "compra", internamente vira "doacao"
-  const tipo = tipoRaw === "compra" ? "doacao" : tipoRaw;
-
-  // valida pelo RAW (porque o painel pode mandar "compra")
-  if (!TICKET_TYPES.has(tipoRaw)) {
+  if (!tipo) {
     return interaction.reply({
       content: "❌ Botão inválido.",
       ephemeral: true
@@ -139,6 +159,7 @@ client.on("interactionCreate", async (interaction) => {
   try {
     const allChannels = await interaction.guild.channels.fetch();
 
+    // 1 ticket por usuário na categoria
     const jaTem = allChannels.find(
       (c) =>
         c.type === ChannelType.GuildText &&
@@ -158,9 +179,7 @@ client.on("interactionCreate", async (interaction) => {
       .replace(/[^a-z0-9-]/g, "")
       .slice(0, 80);
 
-    if (nomeCanal.length < 3) {
-      nomeCanal = `${tipo}-${interaction.user.id}`;
-    }
+    if (nomeCanal.length < 3) nomeCanal = `${tipo}-${interaction.user.id}`;
 
     /* ========= PERMISSÕES ========= */
     const permissionOverwrites = [
@@ -186,8 +205,9 @@ client.on("interactionCreate", async (interaction) => {
       }
     ];
 
-    // 💝 DOAÇÃO → moderação NÃO vê (mesmo que a categoria dê acesso)
+    // 💝 DOAÇÃO → moderação NÃO vê, só OWNER + usuário
     if (tipo === "doacao") {
+      // nega explicitamente o cargo de moderação
       permissionOverwrites.push({
         id: MOD_ROLE_ID,
         deny: [PermissionsBitField.Flags.ViewChannel]
