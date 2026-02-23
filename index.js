@@ -58,9 +58,9 @@ client.once('ready', async () => {
 client.on('interactionCreate', async interaction => {
   if (!interaction.isButton()) return;
 
-  /* ================================
-     🔒 BOTÃO DE FECHAR TICKET
-  ================================== */
+  /* =========================
+     🔒 FECHAR TICKET
+  ========================== */
   if (interaction.customId === 'fechar_ticket') {
 
     if (interaction.channel.parentId !== CATEGORY_ID) {
@@ -89,32 +89,35 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  /* ================================
-     🎟️ CRIAÇÃO DE TICKET
-  ================================== */
+  /* =========================
+     🎟️ CRIAR TICKET
+  ========================== */
 
   const tipo = interaction.customId;
 
+  // 🔥 Verifica pelo ID do usuário salvo no topic
   const jaTem = interaction.guild.channels.cache.find(c =>
     c.parentId === CATEGORY_ID &&
-    c.name.includes(interaction.user.username.toLowerCase())
+    c.topic === interaction.user.id
   );
 
   if (jaTem) {
     return interaction.reply({
-      content: "❌ Você já possui um ticket aberto.",
+      content: `❌ Você já possui um ticket aberto: ${jaTem}`,
       ephemeral: true
     });
   }
 
   const nomeCanal = `${tipo}-${interaction.user.username}`
     .toLowerCase()
-    .replace(/[^a-z0-9-]/g, '');
+    .replace(/[^a-z0-9-]/g, '')
+    .slice(0, 20);
 
   const canal = await interaction.guild.channels.create({
     name: nomeCanal,
     type: ChannelType.GuildText,
     parent: CATEGORY_ID,
+    topic: interaction.user.id, // salva ID do dono
     permissionOverwrites: [
       {
         id: interaction.guild.id,
@@ -144,7 +147,7 @@ client.on('interactionCreate', async interaction => {
   });
 
   await interaction.reply({
-    content: "✅ Seu ticket foi criado!",
+    content: `✅ Seu ticket foi criado: ${canal}`,
     ephemeral: true
   });
 });
