@@ -9,7 +9,10 @@ const {
 } = require("discord.js");
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers // ajuda com member/roles em alguns casos
+  ]
 });
 
 const CATEGORY_ID = "1474912707357577236";
@@ -26,7 +29,9 @@ client.once("ready", async () => {
   const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
   if (!channel) return console.log("❌ Canal do painel não encontrado.");
 
-  const msgs = await channel.messages.fetch({ limit: 10 });
+  const msgs = await channel.messages.fetch({ limit: 10 }).catch(() => null);
+  if (!msgs) return console.log("❌ Não consegui buscar mensagens do canal do painel.");
+
   const jaExiste = msgs.find(
     (m) => m.author?.id === client.user.id && m.components?.length > 0
   );
@@ -57,9 +62,7 @@ client.once("ready", async () => {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
 
-  await interaction.guild.channels.fetch().catch(() => null);
-
-  // 🔒 FECHAR TICKET (só fecha)
+  // 🔒 FECHAR TICKET
   if (interaction.customId === CLOSE_ID) {
     if (interaction.channel.parentId !== CATEGORY_ID) {
       return interaction.reply({
@@ -68,7 +71,6 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // Se quiser que APENAS MOD feche, deixe assim:
     if (!interaction.member.roles.cache.has(MOD_ROLE_ID)) {
       return interaction.reply({
         content: "❌ Apenas a moderação pode encerrar o ticket.",
@@ -82,13 +84,15 @@ client.on("interactionCreate", async (interaction) => {
     });
 
     setTimeout(() => {
-      interaction.channel.delete().catch(() => null);
+      interaction.channel.delete().catch((err) => {
+        console.log("❌ Erro ao deletar canal:", err?.message || err);
+      });
     }, 2000);
 
     return;
   }
 
-  // 🎟️ CRIAR TICKET (só se for denuncia/compra/duvidas)
+  // 🎟️ CRIAR TICKET
   const tipo = interaction.customId;
 
   if (!TICKET_TYPES.has(tipo)) {
@@ -98,7 +102,24 @@ client.on("interactionCreate", async (interaction) => {
     }).catch(() => null);
   }
 
-  const jaTem = interaction.guild.channels.cache.find(
+  // ✅ Busca mais confiável: pega canais da categoria (fetch) e checa topic
+  const category = await interaction.guild.channels.fetch(CATEGORY_ID).catch(() => null);
+  if (!category) {
+    return interaction.reply({
+      content: "❌ Categoria de tickets não encontrada.",
+      ephemeral: true
+    });
+  }
+
+  const children = await interaction.guild.channels.fetch().catch(() => null);
+  if (!children) {
+    return interaction.reply({
+      content: "❌ Não consegui carregar os canais do servidor.",
+      ephemeral: true
+    });
+  }
+
+  const jaTem = children.find(
     (c) => c.parentId === CATEGORY_ID && c.topic === interaction.user.id
   );
 
@@ -120,12 +141,10 @@ client.on("interactionCreate", async (interaction) => {
     parent: CATEGORY_ID,
     topic: interaction.user.id,
     permissionOverwrites: [
-      // Ninguém vê
       {
         id: interaction.guild.id,
         deny: [PermissionsBitField.Flags.ViewChannel]
       },
-      // Dono do ticket vê
       {
         id: interaction.user.id,
         allow: [
@@ -134,7 +153,6 @@ client.on("interactionCreate", async (interaction) => {
           PermissionsBitField.Flags.ReadMessageHistory
         ]
       },
-      // Mod vê
       {
         id: MOD_ROLE_ID,
         allow: [
@@ -143,7 +161,6 @@ client.on("interactionCreate", async (interaction) => {
           PermissionsBitField.Flags.ReadMessageHistory
         ]
       },
-      // ✅ BOT VÊ E CONSEGUE ENVIAR O BOTÃO
       {
         id: client.user.id,
         allow: [
