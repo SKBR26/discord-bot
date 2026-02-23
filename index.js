@@ -26,30 +26,23 @@ const TOKEN = process.env.TOKEN;
 const CLOSE_ID = "ticket_close";
 const creating = new Set();
 
-/**
- * Normaliza customId:
- * - lower
- * - remove acentos (doação -> doacao)
- */
+/* ========= Normalização / compatibilidade ========= */
 function normalizeId(str) {
   return String(str || "")
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, ""); // remove diacríticos
+    .replace(/[\u0300-\u036f]/g, ""); // remove acentos
 }
 
-/**
- * Aceita ids antigos e novos:
- * - compra -> doacao
- * - doação -> doacao
- * - doacao -> doacao
- */
 function mapTipo(customId) {
-  const id = normalizeId(customId);
+  const id = normalizeId(customId).replace(/[^a-z0-9_-]/g, "");
+
+  // Compatibilidade com painéis antigos
   if (id === "compra") return "doacao";
-  if (id === "doacao") return "doacao";
-  if (id === "denuncia") return "denuncia";
-  if (id === "duvidas") return "duvidas";
+  if (id === "doacao" || id === "doacao_ticket" || id.includes("doacao")) return "doacao";
+  if (id === "denuncia" || id.includes("denuncia")) return "denuncia";
+  if (id === "duvidas" || id === "duvida" || id.includes("duvida")) return "duvidas";
+
   return null;
 }
 
@@ -57,19 +50,22 @@ function mapTipo(customId) {
 client.once("ready", async () => {
   console.log(`✅ Bot online como ${client.user.tag}`);
 
-  // ✅ Não mexe no painel: se já existir mensagem com botões, não envia outra
   const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
   if (!channel) return console.log("❌ Canal do painel não encontrado.");
 
-  const msgs = await channel.messages.fetch({ limit: 50 }).catch(() => null);
-  if (!msgs) return console.log("❌ Não consegui buscar mensagens.");
+  // ✅ Limpa painéis antigos do BOT no canal (pra não sobrar botão errado)
+  const msgs = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+  if (!msgs) return console.log("❌ Não consegui buscar mensagens do canal do painel.");
 
-  const jaExiste = msgs.find(
+  const paineisDoBot = msgs.filter(
     (m) => m.author?.id === client.user.id && m.components?.length > 0
   );
-  if (jaExiste) return;
 
-  // (Só cria painel se não existir nenhum do bot)
+  for (const [, m] of paineisDoBot) {
+    await m.delete().catch(() => null);
+  }
+
+  // ✅ Cria o painel NOVO e CORRETO
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("denuncia")
@@ -89,6 +85,8 @@ client.once("ready", async () => {
     content: "🎫 **Sistema de Tickets**\nSelecione o motivo do atendimento:",
     components: [row]
   });
+
+  console.log("✅ Painel recriado com customId corretos (denuncia/doacao/duvidas).");
 });
 
 /* ================= INTERAÇÕES ================= */
@@ -104,7 +102,6 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // Detecta doação por nome do canal (doacao-...)
     const isDoacao = interaction.channel.name?.startsWith("doacao-");
 
     // 💝 Doação: só OWNER fecha
@@ -141,19 +138,20 @@ client.on("interactionCreate", async (interaction) => {
   const tipo = mapTipo(interaction.customId);
 
   if (!tipo) {
+    console.log("❌ Botão inválido customId:", interaction.customId);
     return interaction.reply({
       content: "❌ Botão inválido.",
       ephemeral: true
     });
   }
 
+  // anti clique duplo
   if (creating.has(interaction.user.id)) {
     return interaction.reply({
       content: "⏳ Aguarde, estou criando seu ticket...",
       ephemeral: true
     });
   }
-
   creating.add(interaction.user.id);
 
   try {
@@ -207,7 +205,6 @@ client.on("interactionCreate", async (interaction) => {
 
     // 💝 DOAÇÃO → moderação NÃO vê, só OWNER + usuário
     if (tipo === "doacao") {
-      // nega explicitamente o cargo de moderação
       permissionOverwrites.push({
         id: MOD_ROLE_ID,
         deny: [PermissionsBitField.Flags.ViewChannel]
@@ -239,6 +236,7 @@ client.on("interactionCreate", async (interaction) => {
       name: nomeCanal,
       type: ChannelType.GuildText,
       parent: CATEGORY_ID,
+      // guarda o ID do usuário pra impedir ticket duplicado
       topic: interaction.user.id,
       permissionOverwrites
     });
@@ -256,12 +254,18 @@ client.on("interactionCreate", async (interaction) => {
       duvidas: "❓ **Dúvidas**\nExplique sua dúvida detalhadamente."
     };
 
-    await canal.send({
-      content: `📩 Ticket aberto por ${interaction.user}\n\n${mensagens[tipo]}\n\n${
-        tipo === "doacao" ? `<@${OWNER_ID}>` : `<@&${MOD_ROLE_ID}>`
-      }`,
-      components: [closeRow]
-    });
+    // ✅ Marca OWNER em ticket de doação
+    if (tipo === "doacao") {
+      await canal.send({
+        content: `📩 **Ticket de DOAÇÃO** aberto por ${interaction.user}\n\n${mensagens.doacao}\n\n👑 <@${OWNER_ID}>`,
+        components: [closeRow]
+      });
+    } else {
+      await canal.send({
+        content: `📩 Ticket aberto por ${interaction.user}\n\n${mensagens[tipo]}\n\n<@&${MOD_ROLE_ID}>`,
+        components: [closeRow]
+      });
+    }
 
     await interaction.reply({
       content: `✅ Seu ticket foi criado: ${canal}`,
