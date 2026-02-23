@@ -23,14 +23,17 @@ const OWNER_ID    = "1401261879292198978";
 const TOKEN = process.env.TOKEN;
 /* ========================================== */
 
-const TICKET_TYPES = new Set(["denuncia", "doacao", "duvidas"]);
 const CLOSE_ID = "ticket_close";
 const creating = new Set();
+
+// ✅ NÃO mexe no painel: aceita "compra" (painel antigo) e "doacao" (novo)
+const TICKET_TYPES = new Set(["denuncia", "duvidas", "doacao", "compra"]);
 
 /* ================= BOT READY ================= */
 client.once("ready", async () => {
   console.log(`✅ Bot online como ${client.user.tag}`);
 
+  // ✅ Mantido igual: se o painel já existe, NÃO manda outro (não mexe no painel)
   const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
   if (!channel) return console.log("❌ Canal do painel não encontrado.");
 
@@ -42,6 +45,8 @@ client.once("ready", async () => {
   );
   if (jaExiste) return;
 
+  // Se algum dia você quiser que o bot crie painel novo automaticamente,
+  // deixa esse trecho. Se NÃO quiser, pode apagar essa parte depois.
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("denuncia")
@@ -76,17 +81,17 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // 🔐 DOAÇÃO → só OWNER fecha
-    if (interaction.channel.name.startsWith("doacao-")) {
+    // 💝 Doação: só OWNER fecha
+    const isDoacao = interaction.channel.name?.startsWith("doacao-");
+    if (isDoacao) {
       if (interaction.user.id !== OWNER_ID) {
         return interaction.reply({
           content: "❌ Apenas o OWNER pode encerrar tickets de doação.",
           ephemeral: true
         });
       }
-    } 
-    // 🔐 OUTROS → só MOD
-    else {
+    } else {
+      // Outros: só moderação fecha
       if (!interaction.member.roles.cache.has(MOD_ROLE_ID)) {
         return interaction.reply({
           content: "❌ Apenas a moderação pode encerrar o ticket.",
@@ -108,9 +113,14 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   /* ========= CRIAR TICKET ========= */
-  const tipo = interaction.customId;
+  const tipoRaw = interaction.customId;
 
-  if (!TICKET_TYPES.has(tipo)) {
+  // ✅ Conversão global SEM mexer no painel:
+  // se o painel mandar "compra", internamente vira "doacao"
+  const tipo = tipoRaw === "compra" ? "doacao" : tipoRaw;
+
+  // valida pelo RAW (porque o painel pode mandar "compra")
+  if (!TICKET_TYPES.has(tipoRaw)) {
     return interaction.reply({
       content: "❌ Botão inválido.",
       ephemeral: true
@@ -176,8 +186,13 @@ client.on("interactionCreate", async (interaction) => {
       }
     ];
 
-    // 💝 DOAÇÃO → NÃO adiciona MOD_ROLE
+    // 💝 DOAÇÃO → moderação NÃO vê (mesmo que a categoria dê acesso)
     if (tipo === "doacao") {
+      permissionOverwrites.push({
+        id: MOD_ROLE_ID,
+        deny: [PermissionsBitField.Flags.ViewChannel]
+      });
+
       permissionOverwrites.push({
         id: OWNER_ID,
         allow: [
@@ -186,9 +201,8 @@ client.on("interactionCreate", async (interaction) => {
           PermissionsBitField.Flags.ReadMessageHistory
         ]
       });
-    } 
-    // 🛑 DENÚNCIA / ❓ DÚVIDAS → MOD vê
-    else {
+    } else {
+      // 🛑 Denúncia / ❓ Dúvidas → moderação vê
       permissionOverwrites.push({
         id: MOD_ROLE_ID,
         allow: [
