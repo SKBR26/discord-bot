@@ -1,3 +1,15 @@
+/**
+ * Ticket Bot + Logs (Transcript HTML estilo "print")
+ * Discord.js v14
+ *
+ * ✅ Logs em HTML (quase uma print) ao fechar ticket
+ * ✅ Envia transcript no canal de logs: 1475713089092583554
+ *
+ * IMPORTANTE:
+ * - Ative no Developer Portal do bot: MESSAGE CONTENT INTENT
+ * - Garanta permissões do bot no canal de logs: Ver canal / Enviar / Anexar arquivos / Ler histórico
+ */
+
 const {
   Client,
   GatewayIntentBits,
@@ -59,7 +71,10 @@ function buildPanelRow() {
 
 const PANEL_TEXT = "🎫 **Sistema de Tickets**\nSelecione o motivo do atendimento:";
 
-/* ========= logs / transcript ========= */
+/* =========================================================
+   LOGS: transcript HTML "quase print"
+   ========================================================= */
+
 async function fetchAllMessages(channel, limitTotal = 2000) {
   const all = [];
   let lastId = null;
@@ -80,62 +95,252 @@ async function fetchAllMessages(channel, limitTotal = 2000) {
   return all.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 }
 
-function safeText(s) {
-  return String(s || "").replace(/\r/g, "").trim();
+function brTime(ts) {
+  return new Date(ts).toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    hour12: false
+  });
 }
 
-function formatLine(msg) {
-  const time = new Date(msg.createdTimestamp).toISOString();
-  const author = `${msg.author?.tag || "Unknown"} (${msg.author?.id || "?"})`;
-
-  const content = safeText(msg.content);
-  const attachments = [...msg.attachments.values()].map(a => a.url);
-  const embeds = msg.embeds?.length ? `[embeds:${msg.embeds.length}]` : "";
-
-  let line = `[${time}] ${author}: ${content}`;
-
-  if (attachments.length) line += `\n  Anexos: ${attachments.join(" | ")}`;
-  if (embeds) line += `\n  ${embeds}`;
-
-  return line;
+function escapeHtml(str) {
+  return String(str ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
-async function sendTicketLog({ interaction, closedBy, reason }) {
+function linkify(text) {
+  const escaped = escapeHtml(text);
+  return escaped.replace(
+    /(https?:\/\/[^\s]+)/g,
+    `<a href="$1" target="_blank" rel="noreferrer">$1</a>`
+  );
+}
+
+function normalizeContent(content) {
+  let c = String(content ?? "").replace(/\r/g, "");
+  c = c.replace(/[ \t]+/g, " ").trim();
+  return c;
+}
+
+function isImageAttachment(att) {
+  const name = (att.name || "").toLowerCase();
+  const ct = (att.contentType || "").toLowerCase();
+  return (
+    ct.startsWith("image/") ||
+    name.endsWith(".png") ||
+    name.endsWith(".jpg") ||
+    name.endsWith(".jpeg") ||
+    name.endsWith(".gif") ||
+    name.endsWith(".webp")
+  );
+}
+
+function buildTranscriptHtml({ guild, channel, opener, openerId, closedBy, reason, messages }) {
+  const header = `
+    <div class="header">
+      <div class="title">Transcript do Ticket</div>
+      <div class="meta">
+        <div><b>Servidor:</b> ${escapeHtml(guild.name)} (${guild.id})</div>
+        <div><b>Canal:</b> #${escapeHtml(channel.name)} (${channel.id})</div>
+        <div><b>Aberto por:</b> ${
+          opener ? `${escapeHtml(opener.user.tag)} (${opener.id})` : escapeHtml(openerId || "desconhecido")
+        }</div>
+        <div><b>Fechado por:</b> ${escapeHtml(closedBy?.tag || "desconhecido")} (${escapeHtml(closedBy?.id || "?")})</div>
+        ${reason ? `<div><b>Motivo:</b> ${escapeHtml(reason)}</div>` : ""}
+        <div><b>Fechamento:</b> ${escapeHtml(brTime(Date.now()))} (America/Sao_Paulo)</div>
+        <div><b>Total de mensagens:</b> ${messages.length}</div>
+      </div>
+    </div>
+  `;
+
+  const items = messages.map(msg => {
+    const author = msg.author;
+    const avatar = author?.displayAvatarURL?.({ extension: "png", size: 64 }) || "";
+    const name = author?.username || "Unknown";
+    const tag = author?.tag || "Unknown";
+    const time = brTime(msg.createdTimestamp);
+
+    const content = normalizeContent(msg.content);
+    const contentHtml = content
+      ? `<div class="content">${linkify(content).replace(/\n/g, "<br>")}</div>`
+      : "";
+
+    const attachments = [...msg.attachments.values()];
+    const attHtml = attachments.length
+      ? `
+        <div class="attachments">
+          ${attachments.map(a => {
+            const url = escapeHtml(a.url);
+            const fname = escapeHtml(a.name || "arquivo");
+            if (isImageAttachment(a)) {
+              return `
+                <a class="imgwrap" href="${url}" target="_blank" rel="noreferrer">
+                  <img src="${url}" alt="${fname}">
+                </a>
+              `;
+            }
+            return `<a class="file" href="${url}" target="_blank" rel="noreferrer">📎 ${fname}</a>`;
+          }).join("")}
+        </div>
+      `
+      : "";
+
+    const embedNote = msg.embeds?.length ? `<div class="embednote">🧩 ${msg.embeds.length} embed(s)</div>` : "";
+
+    if (!content && attachments.length === 0 && (!msg.embeds || msg.embeds.length === 0)) return "";
+
+    return `
+      <div class="msg">
+        <img class="avatar" src="${escapeHtml(avatar)}" alt="">
+        <div class="bubble">
+          <div class="topline">
+            <span class="name">${escapeHtml(name)}</span>
+            <span class="tag">${escapeHtml(tag)}</span>
+            <span class="time">${escapeHtml(time)}</span>
+          </div>
+          ${contentHtml}
+          ${attHtml}
+          ${embedNote}
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  return `
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Transcript - ${escapeHtml(channel.name)}</title>
+  <style>
+    :root{
+      --bg:#0f111a;
+      --panel:#151826;
+      --text:#e6e6e6;
+      --muted:#a7adba;
+      --line:rgba(255,255,255,.08);
+      --bubble:#1b2033;
+      --link:#6aa7ff;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      background:var(--bg);
+      color:var(--text);
+    }
+    .wrap{max-width:980px;margin:0 auto;padding:18px}
+    .header{
+      background:var(--panel);
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:14px 14px;
+      margin-bottom:14px;
+    }
+    .title{font-size:18px;font-weight:700;margin-bottom:8px}
+    .meta{color:var(--muted);font-size:13px;line-height:1.6}
+    .msg{
+      display:flex;
+      gap:10px;
+      padding:10px 0;
+      border-bottom:1px solid var(--line);
+    }
+    .avatar{
+      width:42px;height:42px;border-radius:50%;
+      flex:0 0 auto;
+      background:#222;
+      object-fit:cover;
+    }
+    .bubble{
+      flex:1;
+      background:var(--bubble);
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:10px 12px;
+    }
+    .topline{
+      display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;
+      margin-bottom:6px;
+    }
+    .name{font-weight:700}
+    .tag{color:var(--muted);font-size:12px}
+    .time{color:var(--muted);font-size:12px;margin-left:auto}
+    .content{white-space:normal;line-height:1.45}
+    a{color:var(--link);text-decoration:none}
+    a:hover{text-decoration:underline}
+    .attachments{margin-top:8px;display:flex;gap:10px;flex-wrap:wrap}
+    .file{
+      display:inline-block;
+      padding:8px 10px;
+      border:1px solid var(--line);
+      border-radius:12px;
+      background:rgba(255,255,255,.03);
+      font-size:13px;
+    }
+    .imgwrap{
+      border:1px solid var(--line);
+      border-radius:12px;
+      overflow:hidden;
+      display:inline-block;
+      background:rgba(255,255,255,.03);
+    }
+    .imgwrap img{
+      display:block;
+      max-width:320px;
+      height:auto;
+    }
+    .embednote{margin-top:8px;color:var(--muted);font-size:12px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    ${header}
+    ${items || `<div style="color:var(--muted)">Sem mensagens para exibir.</div>`}
+  </div>
+</body>
+</html>
+`;
+}
+
+async function sendTicketLogHtml({ interaction, closedBy, reason, ignoreBotMessages = true }) {
   const guild = interaction.guild;
   const channel = interaction.channel;
 
   const logChannel = await guild.channels.fetch(LOGS_CHANNEL_ID).catch(() => null);
   if (!logChannel) return;
 
-  const openerId = channel.topic; // você já usa topic = user.id
+  const openerId = channel.topic; // topic = user.id
   const opener = openerId ? await guild.members.fetch(openerId).catch(() => null) : null;
 
-  const msgs = await fetchAllMessages(channel, 2000).catch(() => []);
-  const header = [
-    `Ticket: #${channel.name} (${channel.id})`,
-    `Aberto por: ${opener ? `${opener.user.tag} (${opener.id})` : (openerId || "desconhecido")}`,
-    `Fechado por: ${closedBy?.tag || "desconhecido"} (${closedBy?.id || "?"})`,
-    reason ? `Motivo: ${reason}` : null,
-    `Mensagens: ${msgs.length}`,
-    `Data (fechamento): ${new Date().toISOString()}`,
-    `Servidor: ${guild.name} (${guild.id})`,
-    "----------------------------------------"
-  ].filter(Boolean).join("\n");
+  let msgs = await fetchAllMessages(channel, 2000).catch(() => []);
+  if (ignoreBotMessages) {
+    const meId = guild.members.me?.id;
+    if (meId) msgs = msgs.filter(m => m.author?.id !== meId);
+  }
 
-  const body = msgs.map(formatLine).join("\n");
-  const transcript = `${header}\n${body}\n`;
+  const html = buildTranscriptHtml({
+    guild,
+    channel,
+    opener,
+    openerId,
+    closedBy,
+    reason,
+    messages: msgs
+  });
 
-  // nome seguro pro arquivo
   const baseName = `ticket-${channel.name}-${channel.id}`.replace(/[^a-zA-Z0-9-_]/g, "").slice(0, 80);
-  const fileName = `${baseName}.txt`;
+  const fileName = `${baseName}.html`;
 
   await logChannel.send({
-    content: `📁 **Ticket fechado** • \`${channel.name}\` • ID: \`${channel.id}\``,
-    files: [{ attachment: Buffer.from(transcript, "utf-8"), name: fileName }]
+    content: `🧾 **Transcript (estilo print)** • \`${channel.name}\``,
+    files: [{ attachment: Buffer.from(html, "utf-8"), name: fileName }]
   }).catch(() => {});
 }
 
-/* ========= ready ========= */
+/* ================= READY ================= */
 client.once("ready", async () => {
   console.log(`✅ Bot online como ${client.user.tag}`);
 
@@ -159,13 +364,13 @@ client.once("ready", async () => {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
 
-  /* ===== FECHAR TICKET (QUALQUER UM) ===== */
+  /* ===== FECHAR TICKET ===== */
   if (interaction.customId === CLOSE_ID) {
     if (interaction.channel?.parentId !== CATEGORY_ID) {
       return interaction.reply({ content: "❌ Este botão só funciona dentro de um ticket.", ephemeral: true });
     }
 
-    // (Opcional) Só staff fecha:
+    // Opcional: só staff fecha (descomente se quiser)
     // const member = interaction.member;
     // const canClose =
     //   member?.permissions?.has(PermissionsBitField.Flags.ManageChannels) ||
@@ -173,13 +378,17 @@ client.on("interactionCreate", async (interaction) => {
     //   member?.roles?.cache?.has(OWNER_ROLE_ID);
     // if (!canClose) return interaction.reply({ content: "❌ Só a staff pode fechar este ticket.", ephemeral: true });
 
-    await interaction.reply({ content: "🔒 Gerando logs e encerrando ticket em 2 segundos...", ephemeral: true });
+    await interaction.reply({
+      content: "🔒 Gerando transcript (estilo print) e encerrando em 2 segundos...",
+      ephemeral: true
+    });
 
-    // ✅ manda logs antes de apagar
-    await sendTicketLog({
+    // ✅ envia transcript HTML mais limpo (não registra mensagens do bot)
+    await sendTicketLogHtml({
       interaction,
       closedBy: interaction.user,
-      reason: null
+      reason: null,
+      ignoreBotMessages: true
     });
 
     setTimeout(() => interaction.channel.delete().catch(() => {}), 2000);
