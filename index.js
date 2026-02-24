@@ -63,7 +63,11 @@ function buildPanelRow() {
   );
 }
 
-function buildPanelEmbed() {
+// ✅ cor automática do servidor (cor do cargo mais alto do BOT)
+function buildPanelEmbed(guild) {
+  const botMember = guild.members.me;
+  const roleColor = botMember?.roles?.highest?.color || 0x2ecc71;
+
   return new EmbedBuilder()
     .setTitle("🎫 SISTEMA DE TICKETS")
     .setDescription(
@@ -72,7 +76,7 @@ function buildPanelEmbed() {
       "💰 **DOAÇÃO**\n" +
       "❓ **DÚVIDAS**"
     )
-    .setColor(0x2ecc71);
+    .setColor(roleColor);
 }
 
 client.once("ready", async () => {
@@ -94,7 +98,7 @@ client.once("ready", async () => {
   } catch {}
 
   const payload = {
-    embeds: [buildPanelEmbed()],
+    embeds: [buildPanelEmbed(channel.guild)],
     components: [buildPanelRow()]
   };
 
