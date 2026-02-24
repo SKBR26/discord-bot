@@ -17,7 +17,7 @@ const client = new Client({
 const CATEGORY_ID = "1474912707357577236";
 const CHANNEL_ID  = "1474948831882772500";
 const MOD_ROLE_ID = "1474961654793109726";
-const OWNER_ROLE_ID = "1401261879292198978"; // apenas para ver/ser marcado em doação
+const OWNER_ROLE_ID = "1401261879292198978";
 const TOKEN = process.env.TOKEN;
 /* ========================================== */
 
@@ -43,7 +43,7 @@ function mapTipo(customId) {
   return null;
 }
 
-/* ========= PAINEL (EMBED + BOTÕES) ========= */
+/* ========= PAINEL (EMBED SIMPLES) ========= */
 function buildPanelRow() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -67,22 +67,12 @@ function buildPanelEmbed() {
   return new EmbedBuilder()
     .setTitle("🎫 SISTEMA DE TICKETS")
     .setDescription(
-      "Selecione abaixo o **motivo do atendimento** para abrir um ticket.\n\n" +
+      "Selecione abaixo o motivo do atendimento:\n\n" +
       "🛑 **DENÚNCIA**\n" +
-      "Envie provas (prints/vídeo) e descreva o ocorrido.\n\n" +
       "💰 **DOAÇÃO**\n" +
-      "Envie o comprovante e aguarde o retorno.\n\n" +
-      "❓ **DÚVIDAS**\n" +
-      "Explique sua dúvida com detalhes para agilizar o atendimento."
+      "❓ **DÚVIDAS**"
     )
-    .addFields(
-      { name: "⏰ Prazo de retorno", value: "**24h a 48h**", inline: true },
-      { name: "🔒 Privacidade", value: "Tickets são **privados**", inline: true },
-      { name: "✅ Dica", value: "Quanto mais detalhes, mais rápido resolvemos.", inline: false }
-    )
-    // cor da barra lateral do embed (você pode mudar se quiser)
-    .setColor(0x2ecc71)
-    .setFooter({ text: "Clique em um botão para abrir seu ticket." });
+    .setColor(0x2ecc71);
 }
 
 client.once("ready", async () => {
@@ -94,8 +84,6 @@ client.once("ready", async () => {
   let painel = null;
   try {
     const msgs = await channel.messages.fetch({ limit: 50 });
-
-    // pega o painel certo (que tem os 3 botões: denuncia/doacao/duvidas)
     painel = msgs.find(m => {
       if (m.author?.id !== client.user.id) return false;
       if (!m.components?.length) return false;
@@ -105,7 +93,10 @@ client.once("ready", async () => {
     });
   } catch {}
 
-  const payload = { embeds: [buildPanelEmbed()], components: [buildPanelRow()] };
+  const payload = {
+    embeds: [buildPanelEmbed()],
+    components: [buildPanelRow()]
+  };
 
   if (painel) {
     await painel.edit(payload).catch(() => {});
@@ -118,7 +109,7 @@ client.once("ready", async () => {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
 
-  /* ===== FECHAR TICKET (QUALQUER UM) ===== */
+  /* ===== FECHAR TICKET ===== */
   if (interaction.customId === CLOSE_ID) {
     if (interaction.channel?.parentId !== CATEGORY_ID) {
       return interaction.reply({ content: "❌ Este botão só funciona dentro de um ticket.", ephemeral: true });
@@ -211,17 +202,19 @@ client.on("interactionCreate", async (interaction) => {
     });
 
     const closeRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(CLOSE_ID).setLabel("🔒 ENCERRAR TICKET").setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder()
+        .setCustomId(CLOSE_ID)
+        .setLabel("🔒 ENCERRAR TICKET")
+        .setStyle(ButtonStyle.Secondary)
     );
 
-    // 🔥 TEXTOS FINAIS
     const mensagens = {
       denuncia:
-        "🛑 **DENÚNCIA**\nEnvie as provas (prints ou vídeo) e descreva o ocorrido por gentileza.\n\n⏰ **Prazo de retorno: 24h a 48h.**",
+        "🛑 **DENÚNCIA**\nEnvie as provas (prints ou vídeo) e descreva o ocorrido.\n\n⏰ **Prazo: 24h a 48h**",
       doacao:
-        "💰 **DOAÇÃO**\nEnvie o comprovante e aguarde o retorno dos Staffs.\n\n⏰ **Prazo de retorno: 24h a 48h.**",
+        "💰 **DOAÇÃO**\nEnvie o comprovante e aguarde o retorno.\n\n⏰ **Prazo: 24h a 48h**",
       duvidas:
-        "❓ **DÚVIDAS**\nEm que podemos ajudá-los?\n\n⏰ **Prazo de retorno: 24h a 48h.**"
+        "❓ **DÚVIDAS**\nEm que podemos ajudá-los?\n\n⏰ **Prazo: 24h a 48h**"
     };
 
     if (tipo === "doacao") {
