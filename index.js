@@ -9,7 +9,12 @@ const {
 } = require("discord.js");
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
 });
 
 /* ================= CONFIG ================= */
@@ -17,6 +22,7 @@ const CATEGORY_ID = "1474912707357577236";
 const CHANNEL_ID  = "1474948831882772500";
 const MOD_ROLE_ID = "1474961654793109726";
 const OWNER_ROLE_ID = "1401261879292198978"; // apenas para ver/ser marcado em doação
+const LOGS_CHANNEL_ID = "1475713089092583554"; // ✅ canal de logs
 const TOKEN = process.env.TOKEN;
 /* ========================================== */
 
@@ -53,6 +59,83 @@ function buildPanelRow() {
 
 const PANEL_TEXT = "🎫 **Sistema de Tickets**\nSelecione o motivo do atendimento:";
 
+/* ========= logs / transcript ========= */
+async function fetchAllMessages(channel, limitTotal = 2000) {
+  const all = [];
+  let lastId = null;
+
+  while (all.length < limitTotal) {
+    const options = { limit: 100 };
+    if (lastId) options.before = lastId;
+
+    const batch = await channel.messages.fetch(options);
+    if (batch.size === 0) break;
+
+    all.push(...batch.values());
+    lastId = batch.last().id;
+
+    if (batch.size < 100) break;
+  }
+
+  return all.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+}
+
+function safeText(s) {
+  return String(s || "").replace(/\r/g, "").trim();
+}
+
+function formatLine(msg) {
+  const time = new Date(msg.createdTimestamp).toISOString();
+  const author = `${msg.author?.tag || "Unknown"} (${msg.author?.id || "?"})`;
+
+  const content = safeText(msg.content);
+  const attachments = [...msg.attachments.values()].map(a => a.url);
+  const embeds = msg.embeds?.length ? `[embeds:${msg.embeds.length}]` : "";
+
+  let line = `[${time}] ${author}: ${content}`;
+
+  if (attachments.length) line += `\n  Anexos: ${attachments.join(" | ")}`;
+  if (embeds) line += `\n  ${embeds}`;
+
+  return line;
+}
+
+async function sendTicketLog({ interaction, closedBy, reason }) {
+  const guild = interaction.guild;
+  const channel = interaction.channel;
+
+  const logChannel = await guild.channels.fetch(LOGS_CHANNEL_ID).catch(() => null);
+  if (!logChannel) return;
+
+  const openerId = channel.topic; // você já usa topic = user.id
+  const opener = openerId ? await guild.members.fetch(openerId).catch(() => null) : null;
+
+  const msgs = await fetchAllMessages(channel, 2000).catch(() => []);
+  const header = [
+    `Ticket: #${channel.name} (${channel.id})`,
+    `Aberto por: ${opener ? `${opener.user.tag} (${opener.id})` : (openerId || "desconhecido")}`,
+    `Fechado por: ${closedBy?.tag || "desconhecido"} (${closedBy?.id || "?"})`,
+    reason ? `Motivo: ${reason}` : null,
+    `Mensagens: ${msgs.length}`,
+    `Data (fechamento): ${new Date().toISOString()}`,
+    `Servidor: ${guild.name} (${guild.id})`,
+    "----------------------------------------"
+  ].filter(Boolean).join("\n");
+
+  const body = msgs.map(formatLine).join("\n");
+  const transcript = `${header}\n${body}\n`;
+
+  // nome seguro pro arquivo
+  const baseName = `ticket-${channel.name}-${channel.id}`.replace(/[^a-zA-Z0-9-_]/g, "").slice(0, 80);
+  const fileName = `${baseName}.txt`;
+
+  await logChannel.send({
+    content: `📁 **Ticket fechado** • \`${channel.name}\` • ID: \`${channel.id}\``,
+    files: [{ attachment: Buffer.from(transcript, "utf-8"), name: fileName }]
+  }).catch(() => {});
+}
+
+/* ========= ready ========= */
 client.once("ready", async () => {
   console.log(`✅ Bot online como ${client.user.tag}`);
 
@@ -81,7 +164,24 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.channel?.parentId !== CATEGORY_ID) {
       return interaction.reply({ content: "❌ Este botão só funciona dentro de um ticket.", ephemeral: true });
     }
-    await interaction.reply({ content: "🔒 Encerrando ticket em 2 segundos...", ephemeral: true });
+
+    // (Opcional) Só staff fecha:
+    // const member = interaction.member;
+    // const canClose =
+    //   member?.permissions?.has(PermissionsBitField.Flags.ManageChannels) ||
+    //   member?.roles?.cache?.has(MOD_ROLE_ID) ||
+    //   member?.roles?.cache?.has(OWNER_ROLE_ID);
+    // if (!canClose) return interaction.reply({ content: "❌ Só a staff pode fechar este ticket.", ephemeral: true });
+
+    await interaction.reply({ content: "🔒 Gerando logs e encerrando ticket em 2 segundos...", ephemeral: true });
+
+    // ✅ manda logs antes de apagar
+    await sendTicketLog({
+      interaction,
+      closedBy: interaction.user,
+      reason: null
+    });
+
     setTimeout(() => interaction.channel.delete().catch(() => {}), 2000);
     return;
   }
@@ -113,7 +213,9 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     let nomeCanal = `${tipo}-${interaction.user.username || interaction.user.id}`
-      .toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 80);
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "")
+      .slice(0, 80);
     if (nomeCanal.length < 3) nomeCanal = `${tipo}-${interaction.user.id}`;
 
     const permissionOverwrites = [
@@ -172,7 +274,6 @@ client.on("interactionCreate", async (interaction) => {
       new ButtonBuilder().setCustomId(CLOSE_ID).setLabel("🔒 Encerrar Ticket").setStyle(ButtonStyle.Secondary)
     );
 
-    // 🔥 TEXTOS FINAIS
     const mensagens = {
       denuncia:
         "🛑 **Denúncia**\nEnvie as provas (prints ou vídeo) e descreva o ocorrido por gentileza.\n\n⏰ **Prazo de retorno: 24h a 48h.**",
