@@ -46,31 +46,44 @@ function mapTipo(customId) {
 /* ========= PAINEL ========= */
 function buildPanelRow() {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("denuncia")
-      .setLabel("🛑 DENÚNCIA")
-      .setStyle(ButtonStyle.Danger),
-
-    new ButtonBuilder()
-      .setCustomId("doacao")
-      .setLabel("💰 DOAÇÃO")
-      .setStyle(ButtonStyle.Success),
-
-    new ButtonBuilder()
-      .setCustomId("duvidas")
-      .setLabel("❓ DÚVIDAS")
-      .setStyle(ButtonStyle.Primary)
+    new ButtonBuilder().setCustomId("denuncia").setLabel("🛑 DENÚNCIA").setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId("doacao").setLabel("💰 DOAÇÃO").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("duvidas").setLabel("❓ DÚVIDAS").setStyle(ButtonStyle.Primary)
   );
 }
 
-// embed usando a cor do cargo mais alto do BOT (cor "do servidor")
-function buildPanelEmbed(guild) {
-  const botMember = guild.members.me;
-  const roleColor = botMember?.roles?.highest?.color || 0x2ecc71;
+const PANEL_TEXT = "🎫 **Sistema de Tickets**\nSelecione o motivo do atendimento:";
 
+// cor automática do servidor (cor do cargo mais alto do BOT)
+function getServerColor(guild) {
+  const botMember = guild.members.me;
+  return botMember?.roles?.highest?.color || 0x2ecc71;
+}
+
+// ✅ EMBED do painel com footer + timestamp
+function buildPanelEmbed(guild) {
+  const roleColor = getServerColor(guild);
   return new EmbedBuilder()
-    .setDescription("🎫 **Sistema de Tickets**\nSelecione o motivo do atendimento:")
-    .setColor(roleColor);
+    .setDescription(PANEL_TEXT)
+    .setColor(roleColor)
+    .setFooter({
+      text: `${guild.name} • Sistema de Tickets`,
+      iconURL: guild.iconURL?.({ size: 128 }) || undefined
+    })
+    .setTimestamp();
+}
+
+// ✅ EMBED do ticket com footer + timestamp (mantém o texto igual)
+function buildTicketEmbed(guild, textoMensagem) {
+  const roleColor = getServerColor(guild);
+  return new EmbedBuilder()
+    .setDescription(textoMensagem)
+    .setColor(roleColor)
+    .setFooter({
+      text: `${guild.name} • Sistema de Tickets`,
+      iconURL: guild.iconURL?.({ size: 128 }) || undefined
+    })
+    .setTimestamp();
 }
 
 client.once("ready", async () => {
@@ -209,14 +222,18 @@ client.on("interactionCreate", async (interaction) => {
 
     if (tipo === "doacao") {
       await canal.send({
-        content: `📩 **Ticket de DOAÇÃO** aberto por ${interaction.user}\n\n${mensagens.doacao}\n\n👑 <@&${OWNER_ROLE_ID}>`,
+        // mantém seu texto do header igual
+        content: `📩 **Ticket de DOAÇÃO** aberto por ${interaction.user}\n\n👑 <@&${OWNER_ROLE_ID}>`,
         allowedMentions: { roles: [OWNER_ROLE_ID] },
+        // mensagem vai no embed (com footer + timestamp)
+        embeds: [buildTicketEmbed(interaction.guild, mensagens.doacao)],
         components: [closeRow]
       });
     } else {
       await canal.send({
-        content: `📩 Ticket aberto por ${interaction.user}\n\n${mensagens[tipo]}\n\n<@&${MOD_ROLE_ID}>`,
+        content: `📩 Ticket aberto por ${interaction.user}\n\n<@&${MOD_ROLE_ID}>`,
         allowedMentions: { roles: [MOD_ROLE_ID] },
+        embeds: [buildTicketEmbed(interaction.guild, mensagens[tipo])],
         components: [closeRow]
       });
     }
