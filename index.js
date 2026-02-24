@@ -1,17 +1,21 @@
 /**
- * Ticket Bot + Logs (Transcript HTML estilo "print") — versão corrigida
+ * ✅ TICKETS + LOGS HTML (abre no navegador) — COMPLETO E CORRIGIDO
  * Discord.js v14
  *
- * ✅ Evita duplicar painel (procura por texto + customIds)
- * ✅ Evita criar ticket duplicado (lock por usuário+tipo)
- * ✅ Logs HTML no fechamento (com DEBUG no console)
- * ✅ Checa permissões no canal de logs e avisa no console
+ * O que este código faz:
+ * ✅ Cria tickets (denúncia / doação / dúvidas) dentro da categoria CATEGORY_ID
+ * ✅ Evita duplicar painel (não cria painel 2x)
+ * ✅ Evita ticket duplicado (lock forte)
+ * ✅ Ao fechar: gera TRANSCRIPT em HTML (estilo “print do Discord”) e envia no canal de logs
+ * ✅ Só apaga o canal do ticket SE o log for enviado com sucesso (pra não perder conversa)
+ * ✅ Debug no console (mostra exatamente por que falhou, se falhar)
  *
- * IMPORTANTE (portal do Discord):
- * - Ative: MESSAGE CONTENT INTENT
+ * IMPORTANTE (Discord Developer Portal):
+ * - Ligue: MESSAGE CONTENT INTENT
  *
- * IMPORTANTE (permissões do bot):
- * - No canal de logs: Ver canal / Enviar mensagens / Anexar arquivos / Ler histórico
+ * IMPORTANTE (Permissões do bot):
+ * - Canal de logs: Ver Canal / Enviar Mensagens / Anexar Arquivos / Ler Histórico
+ * - Categoria tickets: Gerenciar Canais (ou permissões suficientes para criar/deletar canais)
  */
 
 const {
@@ -35,20 +39,21 @@ const client = new Client({
 
 /* ================= CONFIG ================= */
 const CATEGORY_ID = "1474912707357577236";
-const CHANNEL_ID  = "1474948831882772500";
+const CHANNEL_ID  = "1474948831882772500";      // canal onde fica o painel
 const MOD_ROLE_ID = "1474961654793109726";
-const OWNER_ROLE_ID = "1401261879292198978"; // apenas para ver/ser marcado em doação
-const LOGS_CHANNEL_ID = "1475713089092583554"; // ✅ canal de logs
+const OWNER_ROLE_ID = "1401261879292198978";    // só pra doação
+const LOGS_CHANNEL_ID = "1475713089092583554";  // ✅ canal de logs
 const TOKEN = process.env.TOKEN;
 /* ========================================== */
 
 const CLOSE_ID = "ticket_close";
-const creating = new Set();          // lock por usuário (geral)
-const creatingKey = new Set();       // lock por guild+user+tipo (mais forte)
-const cooldown = new Map();
 const COOLDOWN_MS = 2500;
 
-/* ========= helpers ========= */
+const cooldown = new Map();       // cooldown por usuário
+const creatingUser = new Set();   // lock por usuário
+const creatingKey = new Set();    // lock por guild+user+tipo (evita duplicar mesmo com lag)
+
+/* ================= HELPERS ================= */
 function normalizeId(str) {
   return String(str || "")
     .toLowerCase()
@@ -65,7 +70,7 @@ function mapTipo(customId) {
   return null;
 }
 
-/* ========= painel ========= */
+/* ================= PAINEL ================= */
 function buildPanelRow() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("denuncia").setLabel("🛑 Denúncia").setStyle(ButtonStyle.Danger),
@@ -80,10 +85,8 @@ function isTicketPanelMessage(msg, botId) {
   if (!msg) return false;
   if (msg.author?.id !== botId) return false;
   if (!msg.components?.length) return false;
-  const contentOk = (msg.content || "").includes("Sistema de Tickets");
-  if (!contentOk) return false;
+  if (!(msg.content || "").includes("Sistema de Tickets")) return false;
 
-  // garante que tem os botões certos
   const ids = new Set();
   for (const row of msg.components) {
     for (const c of row.components || []) {
@@ -94,18 +97,17 @@ function isTicketPanelMessage(msg, botId) {
 }
 
 /* =========================================================
-   LOGS: transcript HTML "quase print" + DEBUG
+   LOGS HTML (abre no navegador)
    ========================================================= */
-
 async function fetchAllMessages(channel, limitTotal = 2000) {
   const all = [];
   let lastId = null;
 
   while (all.length < limitTotal) {
-    const options = { limit: 100 };
-    if (lastId) options.before = lastId;
+    const opts = { limit: 100 };
+    if (lastId) opts.before = lastId;
 
-    const batch = await channel.messages.fetch(options);
+    const batch = await channel.messages.fetch(opts);
     if (batch.size === 0) break;
 
     all.push(...batch.values());
@@ -211,7 +213,7 @@ function buildTranscriptHtml({ guild, channel, opener, openerId, closedBy, reaso
 
     const embedNote = msg.embeds?.length ? `<div class="embednote">🧩 ${msg.embeds.length} embed(s)</div>` : "";
 
-    // pula mensagens completamente vazias
+    // pula mensagens vazias
     if (!content && attachments.length === 0 && (!msg.embeds || msg.embeds.length === 0)) return "";
 
     return `
@@ -328,43 +330,56 @@ function buildTranscriptHtml({ guild, channel, opener, openerId, closedBy, reaso
 `;
 }
 
+/**
+ * Retorna:
+ * - true  => log enviado
+ * - false => falhou (e imprime o motivo no console)
+ */
 async function sendTicketLogHtml({ interaction, closedBy, reason, ignoreBotMessages = true }) {
   try {
     const guild = interaction.guild;
     const channel = interaction.channel;
 
     const logChannel = await guild.channels.fetch(LOGS_CHANNEL_ID).catch((e) => {
-      console.error("❌ Não consegui buscar o canal de logs:", e);
+      console.error("❌ [LOG] Não consegui buscar o canal de logs:", e);
       return null;
     });
 
-    if (!logChannel) {
-      console.error("❌ Canal de logs não encontrado. ID:", LOGS_CHANNEL_ID);
-      return;
+    if (!logChannel || logChannel.type !== ChannelType.GuildText) {
+      console.error("❌ [LOG] Canal de logs inválido ou não é texto. ID:", LOGS_CHANNEL_ID);
+      return false;
     }
 
     const me = guild.members.me || (await guild.members.fetchMe().catch(() => null));
-
-    // Debug de permissões no canal de logs
-    if (me) {
-      const perms = logChannel.permissionsFor(me);
-      if (!perms?.has(PermissionsBitField.Flags.ViewChannel)) console.error("❌ Sem ViewChannel no canal de logs");
-      if (!perms?.has(PermissionsBitField.Flags.SendMessages)) console.error("❌ Sem SendMessages no canal de logs");
-      if (!perms?.has(PermissionsBitField.Flags.AttachFiles)) console.error("❌ Sem AttachFiles no canal de logs");
-      if (!perms?.has(PermissionsBitField.Flags.ReadMessageHistory)) console.error("❌ Sem ReadMessageHistory no canal de logs");
+    if (!me) {
+      console.error("❌ [LOG] Não consegui obter o membro do bot (fetchMe).");
+      return false;
     }
 
-    const openerId = channel.topic;
+    // Checagem de permissões no canal de logs
+    const perms = logChannel.permissionsFor(me);
+    const need = [
+      PermissionsBitField.Flags.ViewChannel,
+      PermissionsBitField.Flags.SendMessages,
+      PermissionsBitField.Flags.AttachFiles
+    ];
+    const missing = need.filter(p => !perms?.has(p));
+    if (missing.length) {
+      console.error("❌ [LOG] Faltam permissões no canal de logs:", missing);
+      console.error("➡️ Precisa: Ver canal / Enviar mensagens / Anexar arquivos");
+      return false;
+    }
+
+    const openerId = channel.topic; // topic = user.id
     const opener = openerId ? await guild.members.fetch(openerId).catch(() => null) : null;
 
     let msgs = await fetchAllMessages(channel, 2000).catch((e) => {
-      console.error("❌ Erro ao buscar mensagens do ticket:", e);
+      console.error("❌ [LOG] Erro ao buscar mensagens do ticket:", e);
       return [];
     });
 
     if (ignoreBotMessages) {
-      const meId = me?.id;
-      if (meId) msgs = msgs.filter(m => m.author?.id !== meId);
+      msgs = msgs.filter(m => m.author?.id !== me.id);
     }
 
     const html = buildTranscriptHtml({
@@ -377,17 +392,22 @@ async function sendTicketLogHtml({ interaction, closedBy, reason, ignoreBotMessa
       messages: msgs
     });
 
-    const baseName = `ticket-${channel.name}-${channel.id}`.replace(/[^a-zA-Z0-9-_]/g, "").slice(0, 80);
-    const fileName = `${baseName}.html`;
+    const safeBase = `ticket-${channel.name}-${channel.id}`
+      .replace(/[^a-zA-Z0-9-_]/g, "")
+      .slice(0, 80);
+
+    const fileName = `${safeBase}.html`;
 
     await logChannel.send({
-      content: `🧾 **Transcript (estilo print)** • \`${channel.name}\``,
+      content: `🧾 **Transcript (abre no navegador)** • \`${channel.name}\``,
       files: [{ attachment: Buffer.from(html, "utf-8"), name: fileName }]
     });
 
-    console.log(`✅ Log enviado para #${logChannel.name} | Ticket: ${channel.id}`);
+    console.log(`✅ [LOG] Transcript enviado para #${logChannel.name} | Ticket: ${channel.id}`);
+    return true;
   } catch (e) {
-    console.error("❌ Falha geral ao enviar log:", e);
+    console.error("❌ [LOG] Falha geral ao enviar transcript:", e);
+    return false;
   }
 }
 
@@ -395,18 +415,31 @@ async function sendTicketLogHtml({ interaction, closedBy, reason, ignoreBotMessa
 client.once("ready", async () => {
   console.log(`✅ Bot online como ${client.user.tag}`);
 
+  // ✅ TESTE DO CANAL DE LOGS (se falhar, vai ficar claro o motivo)
+  try {
+    const logs = await client.channels.fetch(LOGS_CHANNEL_ID);
+    if (!logs || logs.type !== ChannelType.GuildText) {
+      console.error("❌ Canal de logs não é texto ou não foi encontrado. ID:", LOGS_CHANNEL_ID);
+    } else {
+      console.log("✅ Canal de logs encontrado:", logs.name, "| ID:", LOGS_CHANNEL_ID);
+    }
+  } catch (e) {
+    console.error("❌ Não consegui acessar o canal de logs. Verifique ID/permissões:", e);
+  }
+
+  // Painel
   const channel = await client.channels.fetch(CHANNEL_ID).catch((e) => {
     console.error("❌ Não consegui buscar o canal do painel:", e);
     return null;
   });
-  if (!channel) return;
+  if (!channel || channel.type !== ChannelType.GuildText) return;
 
   let painel = null;
   try {
     const msgs = await channel.messages.fetch({ limit: 50 });
     painel = msgs.find(m => isTicketPanelMessage(m, client.user.id));
   } catch (e) {
-    console.error("❌ Erro ao buscar mensagens do canal do painel:", e);
+    console.error("❌ Erro ao buscar mensagens do painel:", e);
   }
 
   if (painel) {
@@ -430,22 +463,30 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.reply({ content: "❌ Este botão só funciona dentro de um ticket.", ephemeral: true });
     }
 
-    await interaction.reply({
-      content: "🔒 Gerando transcript (estilo print) e encerrando em 2 segundos...",
-      ephemeral: true
-    });
+    await interaction.reply({ content: "🧾 Salvando transcript (HTML) no canal de logs...", ephemeral: true });
 
-    // ✅ manda o log antes de apagar
-    await sendTicketLogHtml({
+    // ✅ tenta salvar log
+    const ok = await sendTicketLogHtml({
       interaction,
       closedBy: interaction.user,
       reason: null,
       ignoreBotMessages: true
     });
 
+    // ✅ se falhar, NÃO apaga o ticket (pra você não perder conversa)
+    if (!ok) {
+      return interaction.followUp({
+        content: "❌ Não consegui salvar o log. **NÃO vou apagar o ticket.** Veja o console do bot (permissão/erro).",
+        ephemeral: true
+      });
+    }
+
+    await interaction.followUp({ content: "✅ Log salvo! Encerrando ticket em 2 segundos...", ephemeral: true });
+
     setTimeout(() => interaction.channel.delete().catch((e) => {
-      console.error("❌ Falha ao deletar canal do ticket:", e);
+      console.error("❌ Falha ao deletar o canal do ticket:", e);
     }), 2000);
+
     return;
   }
 
@@ -457,21 +498,19 @@ client.on("interactionCreate", async (interaction) => {
   cooldown.set(interaction.user.id, now);
 
   const tipo = mapTipo(interaction.customId);
-  if (!tipo) {
-    return interaction.reply({ content: "❌ Botão inválido.", ephemeral: true });
-  }
+  if (!tipo) return interaction.reply({ content: "❌ Botão inválido.", ephemeral: true });
 
   const key = `${interaction.guildId}:${interaction.user.id}:${tipo}`;
-  if (creatingKey.has(key) || creating.has(interaction.user.id)) {
+  if (creatingKey.has(key) || creatingUser.has(interaction.user.id)) {
     return interaction.reply({ content: "⏳ Aguarde, estou criando seu ticket...", ephemeral: true });
   }
   creatingKey.add(key);
-  creating.add(interaction.user.id);
+  creatingUser.add(interaction.user.id);
 
   try {
     const allChannels = await interaction.guild.channels.fetch();
 
-    // já tem ticket aberto (qualquer tipo)
+    // 1 ticket por usuário dentro da categoria
     const jaTem = allChannels.find(
       c => c.type === ChannelType.GuildText && c.parentId === CATEGORY_ID && c.topic === interaction.user.id
     );
@@ -571,7 +610,7 @@ client.on("interactionCreate", async (interaction) => {
       await interaction.reply({ content: "❌ Deu erro ao criar seu ticket. Tente novamente.", ephemeral: true });
     } catch {}
   } finally {
-    creating.delete(interaction.user.id);
+    creatingUser.delete(interaction.user.id);
     creatingKey.delete(key);
   }
 });
