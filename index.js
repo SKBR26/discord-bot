@@ -5,7 +5,8 @@ const {
   PermissionsBitField,
   ActionRowBuilder,
   ButtonBuilder,
-  ButtonStyle
+  ButtonStyle,
+  EmbedBuilder
 } = require("discord.js");
 
 const client = new Client({
@@ -42,7 +43,7 @@ function mapTipo(customId) {
   return null;
 }
 
-/* ========= PAINEL ========= */
+/* ========= PAINEL (EMBED + BOTÕES) ========= */
 function buildPanelRow() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -62,7 +63,27 @@ function buildPanelRow() {
   );
 }
 
-const PANEL_TEXT = "🎫 **SISTEMA DE TICKETS**\nSelecione o motivo do atendimento:";
+function buildPanelEmbed() {
+  return new EmbedBuilder()
+    .setTitle("🎫 SISTEMA DE TICKETS")
+    .setDescription(
+      "Selecione abaixo o **motivo do atendimento** para abrir um ticket.\n\n" +
+      "🛑 **DENÚNCIA**\n" +
+      "Envie provas (prints/vídeo) e descreva o ocorrido.\n\n" +
+      "💰 **DOAÇÃO**\n" +
+      "Envie o comprovante e aguarde o retorno.\n\n" +
+      "❓ **DÚVIDAS**\n" +
+      "Explique sua dúvida com detalhes para agilizar o atendimento."
+    )
+    .addFields(
+      { name: "⏰ Prazo de retorno", value: "**24h a 48h**", inline: true },
+      { name: "🔒 Privacidade", value: "Tickets são **privados**", inline: true },
+      { name: "✅ Dica", value: "Quanto mais detalhes, mais rápido resolvemos.", inline: false }
+    )
+    // cor da barra lateral do embed (você pode mudar se quiser)
+    .setColor(0x2ecc71)
+    .setFooter({ text: "Clique em um botão para abrir seu ticket." });
+}
 
 client.once("ready", async () => {
   console.log(`✅ Bot online como ${client.user.tag}`);
@@ -74,7 +95,7 @@ client.once("ready", async () => {
   try {
     const msgs = await channel.messages.fetch({ limit: 50 });
 
-    // pega o painel certo (que tem os 3 botões)
+    // pega o painel certo (que tem os 3 botões: denuncia/doacao/duvidas)
     painel = msgs.find(m => {
       if (m.author?.id !== client.user.id) return false;
       if (!m.components?.length) return false;
@@ -84,10 +105,12 @@ client.once("ready", async () => {
     });
   } catch {}
 
+  const payload = { embeds: [buildPanelEmbed()], components: [buildPanelRow()] };
+
   if (painel) {
-    await painel.edit({ content: PANEL_TEXT, components: [buildPanelRow()] }).catch(() => {});
+    await painel.edit(payload).catch(() => {});
   } else {
-    await channel.send({ content: PANEL_TEXT, components: [buildPanelRow()] }).catch(() => {});
+    await channel.send(payload).catch(() => {});
   }
 });
 
@@ -132,9 +155,7 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     let nomeCanal = `${tipo}-${interaction.user.username || interaction.user.id}`
-      .toLowerCase()
-      .replace(/[^a-z0-9-]/g, "")
-      .slice(0, 80);
+      .toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 80);
     if (nomeCanal.length < 3) nomeCanal = `${tipo}-${interaction.user.id}`;
 
     const permissionOverwrites = [
