@@ -17,7 +17,7 @@ const client = new Client({
 const CATEGORY_ID = "1474912707357577236";
 const CHANNEL_ID  = "1474948831882772500";
 const MOD_ROLE_ID = "1474961654793109726";
-const OWNER_ROLE_ID = "1401261879292198978"; // apenas para ver/ser marcado em doação
+const OWNER_ROLE_ID = "1401261879292198978";
 const TOKEN = process.env.TOKEN;
 /* ========================================== */
 
@@ -43,6 +43,12 @@ function mapTipo(customId) {
   return null;
 }
 
+/* ========= CORES ========= */
+function getServerColor(guild) {
+  const botMember = guild.members.me;
+  return botMember?.roles?.highest?.color || 0x2ecc71;
+}
+
 /* ========= PAINEL ========= */
 function buildPanelRow() {
   return new ActionRowBuilder().addComponents(
@@ -52,40 +58,37 @@ function buildPanelRow() {
   );
 }
 
-const PANEL_TEXT = "🎫 **Sistema de Tickets**\nSelecione o motivo do atendimento:";
-
-// cor automática do servidor (cor do cargo mais alto do BOT)
-function getServerColor(guild) {
-  const botMember = guild.members.me;
-  return botMember?.roles?.highest?.color || 0x2ecc71;
-}
-
-// ✅ EMBED do painel com footer + timestamp
+// ✅ Painel SEM horário e rodapé só "ERA DOS GIGANTES"
 function buildPanelEmbed(guild) {
-  const roleColor = getServerColor(guild);
   return new EmbedBuilder()
-    .setDescription(PANEL_TEXT)
-    .setColor(roleColor)
+    .setDescription("🎫 **Sistema de Tickets**\nSelecione o motivo do atendimento:")
+    .setColor(getServerColor(guild))
     .setFooter({
-      text: `${guild.name} • Sistema de Tickets`,
+      text: "ERA DOS GIGANTES",
+      iconURL: guild.iconURL?.({ size: 128 }) || undefined
+    });
+  // sem .setTimestamp()
+}
+
+/* ========= EMBED DO TICKET (cores por tipo + footer + timestamp) ========= */
+function buildTicketEmbed(guild, tipo, texto) {
+  const colors = {
+    denuncia: 0xe74c3c, // vermelho
+    doacao:   0x2ecc71, // verde
+    duvidas:  0x3498db  // azul
+  };
+
+  return new EmbedBuilder()
+    .setDescription(texto)
+    .setColor(colors[tipo] || getServerColor(guild))
+    .setFooter({
+      text: `${guild.name}`,
       iconURL: guild.iconURL?.({ size: 128 }) || undefined
     })
     .setTimestamp();
 }
 
-// ✅ EMBED do ticket com footer + timestamp (mantém o texto igual)
-function buildTicketEmbed(guild, textoMensagem) {
-  const roleColor = getServerColor(guild);
-  return new EmbedBuilder()
-    .setDescription(textoMensagem)
-    .setColor(roleColor)
-    .setFooter({
-      text: `${guild.name} • Sistema de Tickets`,
-      iconURL: guild.iconURL?.({ size: 128 }) || undefined
-    })
-    .setTimestamp();
-}
-
+/* ========= READY ========= */
 client.once("ready", async () => {
   console.log(`✅ Bot online como ${client.user.tag}`);
 
@@ -94,8 +97,14 @@ client.once("ready", async () => {
 
   let painel = null;
   try {
-    const msgs = await channel.messages.fetch({ limit: 30 });
-    painel = msgs.find(m => m.author?.id === client.user.id && m.components?.length > 0);
+    const msgs = await channel.messages.fetch({ limit: 50 });
+    painel = msgs.find(m => {
+      if (m.author?.id !== client.user.id) return false;
+      if (!m.components?.length) return false;
+
+      const ids = m.components.flatMap(r => r.components || []).map(c => c.customId);
+      return ids.includes("denuncia") && ids.includes("doacao") && ids.includes("duvidas");
+    });
   } catch {}
 
   const payload = {
@@ -114,7 +123,7 @@ client.once("ready", async () => {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
 
-  /* ===== FECHAR TICKET (QUALQUER UM) ===== */
+  /* ===== FECHAR ===== */
   if (interaction.customId === CLOSE_ID) {
     if (interaction.channel?.parentId !== CATEGORY_ID) {
       return interaction.reply({ content: "❌ Este botão só funciona dentro de um ticket.", ephemeral: true });
@@ -124,7 +133,7 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
-  /* ===== CRIAR TICKET ===== */
+  /* ===== COOLDOWN ===== */
   const now = Date.now();
   if (now - (cooldown.get(interaction.user.id) || 0) < COOLDOWN_MS) {
     return interaction.reply({ content: "⏳ Aguarde um instante...", ephemeral: true });
@@ -210,7 +219,7 @@ client.on("interactionCreate", async (interaction) => {
       new ButtonBuilder().setCustomId(CLOSE_ID).setLabel("🔒 Encerrar Ticket").setStyle(ButtonStyle.Secondary)
     );
 
-    // 🔥 TEXTOS FINAIS (mantidos iguais, só mudou 💝 -> 💰)
+    // TEXTOS (mantidos, só 💰 na doação)
     const mensagens = {
       denuncia:
         "🛑 **Denúncia**\nEnvie as provas (prints ou vídeo) e descreva o ocorrido por gentileza.\n\n⏰ **Prazo de retorno: 24h a 48h.**",
@@ -222,18 +231,16 @@ client.on("interactionCreate", async (interaction) => {
 
     if (tipo === "doacao") {
       await canal.send({
-        // mantém seu texto do header igual
         content: `📩 **Ticket de DOAÇÃO** aberto por ${interaction.user}\n\n👑 <@&${OWNER_ROLE_ID}>`,
         allowedMentions: { roles: [OWNER_ROLE_ID] },
-        // mensagem vai no embed (com footer + timestamp)
-        embeds: [buildTicketEmbed(interaction.guild, mensagens.doacao)],
+        embeds: [buildTicketEmbed(interaction.guild, "doacao", mensagens.doacao)],
         components: [closeRow]
       });
     } else {
       await canal.send({
         content: `📩 Ticket aberto por ${interaction.user}\n\n<@&${MOD_ROLE_ID}>`,
         allowedMentions: { roles: [MOD_ROLE_ID] },
-        embeds: [buildTicketEmbed(interaction.guild, mensagens[tipo])],
+        embeds: [buildTicketEmbed(interaction.guild, tipo, mensagens[tipo])],
         components: [closeRow]
       });
     }
