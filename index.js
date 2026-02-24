@@ -58,11 +58,10 @@ function buildPanelRow() {
   );
 }
 
-// Painel: sem horário e footer só "ERA DOS GIGANTES"
+// ✅ Painel SEM horário e rodapé só "ERA DOS GIGANTES"
 function buildPanelEmbed(guild) {
   return new EmbedBuilder()
-    .setTitle("🎫 SISTEMA DE TICKETS")
-    .setDescription("Selecione o motivo do atendimento:")
+    .setDescription("🎫 **Sistema de Tickets**\nSelecione o motivo do atendimento:")
     .setColor(getServerColor(guild))
     .setFooter({
       text: "ERA DOS GIGANTES",
@@ -71,7 +70,7 @@ function buildPanelEmbed(guild) {
   // sem .setTimestamp()
 }
 
-/* ========= TICKET EMBED ========= */
+/* ========= EMBED DO TICKET (cores por tipo + footer + timestamp) ========= */
 function buildTicketEmbed(guild, tipo, texto) {
   const colors = {
     denuncia: 0xe74c3c, // vermelho
@@ -79,21 +78,14 @@ function buildTicketEmbed(guild, tipo, texto) {
     duvidas:  0x3498db  // azul
   };
 
-  const titles = {
-    denuncia: "🛑 DENÚNCIA",
-    doacao:   "💰 DOAÇÃO",
-    duvidas:  "❓ DÚVIDAS"
-  };
-
   return new EmbedBuilder()
-    .setTitle(titles[tipo] || "🎫 TICKET")
     .setDescription(texto)
     .setColor(colors[tipo] || getServerColor(guild))
     .setFooter({
-      text: "ERA DOS GIGANTES",
+      text: `${guild.name}`,
       iconURL: guild.iconURL?.({ size: 128 }) || undefined
     })
-    .setTimestamp(); // mantém horário nos tickets
+    .setTimestamp();
 }
 
 /* ========= READY ========= */
@@ -106,7 +98,6 @@ client.once("ready", async () => {
   let painel = null;
   try {
     const msgs = await channel.messages.fetch({ limit: 50 });
-    // garante que é o painel certo (3 botões)
     painel = msgs.find(m => {
       if (m.author?.id !== client.user.id) return false;
       if (!m.components?.length) return false;
@@ -132,7 +123,7 @@ client.once("ready", async () => {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
 
-  /* ===== FECHAR TICKET (QUALQUER UM) ===== */
+  /* ===== FECHAR ===== */
   if (interaction.customId === CLOSE_ID) {
     if (interaction.channel?.parentId !== CATEGORY_ID) {
       return interaction.reply({ content: "❌ Este botão só funciona dentro de um ticket.", ephemeral: true });
@@ -142,7 +133,7 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
-  /* ===== CRIAR TICKET ===== */
+  /* ===== COOLDOWN ===== */
   const now = Date.now();
   if (now - (cooldown.get(interaction.user.id) || 0) < COOLDOWN_MS) {
     return interaction.reply({ content: "⏳ Aguarde um instante...", ephemeral: true });
@@ -225,10 +216,10 @@ client.on("interactionCreate", async (interaction) => {
     });
 
     const closeRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(CLOSE_ID).setLabel("🔒 ENCERRAR TICKET").setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId(CLOSE_ID).setLabel("🔒 Encerrar Ticket").setStyle(ButtonStyle.Secondary)
     );
 
-    // TEXTOS (mantidos)
+    // TEXTOS (mantidos, só 💰 na doação)
     const mensagens = {
       denuncia:
         "🛑 **Denúncia**\nEnvie as provas (prints ou vídeo) e descreva o ocorrido por gentileza.\n\n⏰ **Prazo de retorno: 24h a 48h.**",
@@ -261,3 +252,4 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 client.login(TOKEN);
+
