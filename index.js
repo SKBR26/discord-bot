@@ -5,7 +5,8 @@ const {
   PermissionsBitField,
   ActionRowBuilder,
   ButtonBuilder,
-  ButtonStyle
+  ButtonStyle,
+  EmbedBuilder
 } = require("discord.js");
 
 const client = new Client({
@@ -46,7 +47,7 @@ function mapTipo(customId) {
   return null;
 }
 
-/* ========= PAINEL ========= */
+/* ========= PAINEL (EMBED) ========= */
 function buildPanelRow() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -66,20 +67,32 @@ function buildPanelRow() {
   );
 }
 
-const PANEL_TEXT =
-  "🎫 **SISTEMA DE TICKETS**\n" +
-  "Selecione o motivo do atendimento:";
+function buildPanelEmbed() {
+  return new EmbedBuilder()
+    .setTitle("🎫 SISTEMA DE TICKETS")
+    .setDescription(
+      "**Selecione o motivo do atendimento:**\n\n" +
+      "🛑 **DENÚNCIA**\n" +
+      "💰 **DOAÇÃO**\n" +
+      "❓ **DÚVIDAS**"
+    )
+    .setFooter({ text: "Clique em um botão para abrir seu ticket." })
+    // cor do embed (barra lateral). Você pode mudar depois.
+    .setColor(0x2ecc71);
+}
 
 /* ===== encontra painel correto ===== */
 async function findPanel(channel) {
   const msgs = await channel.messages.fetch({ limit: 50 });
-  return msgs.find(m => {
-    if (m.author?.id !== client.user.id) return false;
-    if (!m.components?.length) return false;
+  return (
+    msgs.find(m => {
+      if (m.author?.id !== client.user.id) return false;
+      if (!m.components?.length) return false;
 
-    const ids = m.components.flatMap(r => r.components).map(b => b.customId);
-    return ids.includes("denuncia") && ids.includes("doacao") && ids.includes("duvidas");
-  }) || null;
+      const ids = m.components.flatMap(r => r.components).map(b => b.customId);
+      return ids.includes("denuncia") && ids.includes("doacao") && ids.includes("duvidas");
+    }) || null
+  );
 }
 
 /* ===== cria ou edita painel ===== */
@@ -88,10 +101,16 @@ async function upsertPanel() {
   if (!channel) return;
 
   const painel = await findPanel(channel);
+
+  const payload = {
+    embeds: [buildPanelEmbed()],
+    components: [buildPanelRow()]
+  };
+
   if (painel) {
-    await painel.edit({ content: PANEL_TEXT, components: [buildPanelRow()] });
+    await painel.edit(payload).catch(() => {});
   } else {
-    await channel.send({ content: PANEL_TEXT, components: [buildPanelRow()] });
+    await channel.send(payload).catch(() => {});
   }
 }
 
@@ -100,13 +119,14 @@ client.once("ready", async () => {
   await upsertPanel();
 });
 
-/* ===== comando !painel ===== */
+/* ===== comando !painel (teste rápido) ===== */
 client.on("messageCreate", async (msg) => {
   if (msg.author.bot) return;
   if (msg.channel.id !== CHANNEL_ID) return;
-  if (msg.content.toLowerCase() === "!painel") {
+
+  if (msg.content.trim().toLowerCase() === "!painel") {
     await upsertPanel();
-    await msg.reply("✅ Painel atualizado!");
+    await msg.reply("✅ Painel atualizado!").catch(() => {});
   }
 });
 
@@ -116,7 +136,7 @@ client.on("interactionCreate", async (interaction) => {
 
   /* ===== FECHAR TICKET ===== */
   if (interaction.customId === CLOSE_ID) {
-    if (interaction.channel.parentId !== CATEGORY_ID) {
+    if (interaction.channel?.parentId !== CATEGORY_ID) {
       return interaction.reply({ content: "❌ Use isso dentro de um ticket.", ephemeral: true });
     }
     await interaction.reply({ content: "🔒 Encerrando ticket...", ephemeral: true });
@@ -132,7 +152,9 @@ client.on("interactionCreate", async (interaction) => {
   cooldown.set(interaction.user.id, now);
 
   const tipo = mapTipo(interaction.customId);
-  if (!tipo) return;
+  if (!tipo) {
+    return interaction.reply({ content: "❌ Botão inválido.", ephemeral: true });
+  }
 
   if (creating.has(interaction.user.id)) {
     return interaction.reply({ content: "⏳ Criando seu ticket...", ephemeral: true });
@@ -148,19 +170,54 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.reply({ content: `❌ Você já tem um ticket: ${aberto}`, ephemeral: true });
     }
 
-    const nome = `${tipo}-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 80);
+    let nome = `${tipo}-${interaction.user.username || interaction.user.id}`
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "")
+      .slice(0, 80);
+    if (nome.length < 3) nome = `${tipo}-${interaction.user.id}`;
 
     const perms = [
       { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-      { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
-      { id: client.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.ManageChannels] }
+      {
+        id: interaction.user.id,
+        allow: [
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.ReadMessageHistory
+        ]
+      },
+      {
+        id: client.user.id,
+        allow: [
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.ReadMessageHistory,
+          PermissionsBitField.Flags.ManageChannels
+        ]
+      }
     ];
 
     if (tipo === "doacao") {
       perms.push({ id: MOD_ROLE_ID, deny: [PermissionsBitField.Flags.ViewChannel] });
-      perms.push({ id: OWNER_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] });
+      perms.push({
+        id: OWNER_ROLE_ID,
+        allow: [
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.ReadMessageHistory
+        ]
+      });
     } else {
-      perms.push({ id: MOD_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] });
+      perms.push({
+        id: MOD_ROLE_ID,
+        allow: [
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.ReadMessageHistory,
+          PermissionsBitField.Flags.ManageChannels,
+          PermissionsBitField.Flags.ManageMessages
+        ]
+      });
     }
 
     const canal = await interaction.guild.channels.create({
@@ -179,15 +236,27 @@ client.on("interactionCreate", async (interaction) => {
     );
 
     const mensagens = {
-      denuncia: "🛑 **DENÚNCIA**\nEnvie as provas.\n⏰ 24h a 48h",
-      doacao: "💰 **DOAÇÃO**\nEnvie o comprovante.\n⏰ 24h a 48h",
-      duvidas: "❓ **DÚVIDAS**\nExplique sua dúvida.\n⏰ 24h a 48h"
+      denuncia:
+        "🛑 **DENÚNCIA**\nEnvie as provas (prints ou vídeo) e descreva o ocorrido.\n\n⏰ **Prazo de retorno: 24h a 48h.**",
+      doacao:
+        "💰 **DOAÇÃO**\nEnvie o comprovante e aguarde o retorno.\n\n⏰ **Prazo de retorno: 24h a 48h.**",
+      duvidas:
+        "❓ **DÚVIDAS**\nEm que podemos ajudar?\n\n⏰ **Prazo de retorno: 24h a 48h.**"
     };
 
-    await canal.send({
-      content: `📩 Ticket aberto por ${interaction.user}\n\n${mensagens[tipo]}`,
-      components: [closeRow]
-    });
+    if (tipo === "doacao") {
+      await canal.send({
+        content: `📩 **TICKET DE DOAÇÃO** aberto por ${interaction.user}\n\n${mensagens.doacao}\n\n👑 <@&${OWNER_ROLE_ID}>`,
+        allowedMentions: { roles: [OWNER_ROLE_ID] },
+        components: [closeRow]
+      });
+    } else {
+      await canal.send({
+        content: `📩 Ticket aberto por ${interaction.user}\n\n${mensagens[tipo]}\n\n<@&${MOD_ROLE_ID}>`,
+        allowedMentions: { roles: [MOD_ROLE_ID] },
+        components: [closeRow]
+      });
+    }
 
     await interaction.reply({ content: `✅ Ticket criado: ${canal}`, ephemeral: true });
   } finally {
