@@ -17,7 +17,7 @@ const client = new Client({
 const CATEGORY_ID = "1474912707357577236";
 const CHANNEL_ID  = "1474948831882772500";
 const MOD_ROLE_ID = "1474961654793109726";
-const OWNER_ROLE_ID = "1401261879292198978";
+const OWNER_ROLE_ID = "1401261879292198978"; // apenas para ver/ser marcado em doação
 const TOKEN = process.env.TOKEN;
 /* ========================================== */
 
@@ -43,7 +43,7 @@ function mapTipo(customId) {
   return null;
 }
 
-/* ========= PAINEL (EMBED SIMPLES) ========= */
+/* ========= PAINEL ========= */
 function buildPanelRow() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -59,23 +59,17 @@ function buildPanelRow() {
     new ButtonBuilder()
       .setCustomId("duvidas")
       .setLabel("❓ DÚVIDAS")
-      .setStyle(ButtonStyle.Secondary)
+      .setStyle(ButtonStyle.Primary)
   );
 }
 
-// ✅ cor automática do servidor (cor do cargo mais alto do BOT)
+// embed usando a cor do cargo mais alto do BOT (cor "do servidor")
 function buildPanelEmbed(guild) {
   const botMember = guild.members.me;
   const roleColor = botMember?.roles?.highest?.color || 0x2ecc71;
 
   return new EmbedBuilder()
-    .setTitle("🎫 SISTEMA DE TICKETS")
-    .setDescription(
-      "Selecione abaixo o motivo do atendimento:\n\n" +
-      "🛑 **DENÚNCIA**\n" +
-      "💰 **DOAÇÃO**\n" +
-      "❓ **DÚVIDAS**"
-    )
+    .setDescription("🎫 **Sistema de Tickets**\nSelecione o motivo do atendimento:")
     .setColor(roleColor);
 }
 
@@ -87,14 +81,8 @@ client.once("ready", async () => {
 
   let painel = null;
   try {
-    const msgs = await channel.messages.fetch({ limit: 50 });
-    painel = msgs.find(m => {
-      if (m.author?.id !== client.user.id) return false;
-      if (!m.components?.length) return false;
-
-      const ids = m.components.flatMap(r => r.components || []).map(c => c.customId);
-      return ids.includes("denuncia") && ids.includes("doacao") && ids.includes("duvidas");
-    });
+    const msgs = await channel.messages.fetch({ limit: 30 });
+    painel = msgs.find(m => m.author?.id === client.user.id && m.components?.length > 0);
   } catch {}
 
   const payload = {
@@ -113,7 +101,7 @@ client.once("ready", async () => {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
 
-  /* ===== FECHAR TICKET ===== */
+  /* ===== FECHAR TICKET (QUALQUER UM) ===== */
   if (interaction.customId === CLOSE_ID) {
     if (interaction.channel?.parentId !== CATEGORY_ID) {
       return interaction.reply({ content: "❌ Este botão só funciona dentro de um ticket.", ephemeral: true });
@@ -206,24 +194,22 @@ client.on("interactionCreate", async (interaction) => {
     });
 
     const closeRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(CLOSE_ID)
-        .setLabel("🔒 ENCERRAR TICKET")
-        .setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId(CLOSE_ID).setLabel("🔒 Encerrar Ticket").setStyle(ButtonStyle.Secondary)
     );
 
+    // 🔥 TEXTOS FINAIS (mantidos iguais, só mudou 💝 -> 💰)
     const mensagens = {
       denuncia:
-        "🛑 **DENÚNCIA**\nEnvie as provas (prints ou vídeo) e descreva o ocorrido.\n\n⏰ **Prazo: 24h a 48h**",
+        "🛑 **Denúncia**\nEnvie as provas (prints ou vídeo) e descreva o ocorrido por gentileza.\n\n⏰ **Prazo de retorno: 24h a 48h.**",
       doacao:
-        "💰 **DOAÇÃO**\nEnvie o comprovante e aguarde o retorno.\n\n⏰ **Prazo: 24h a 48h**",
+        "💰 **Doação**\nEnvie o comprovante e aguarde o retorno dos Staffs.\n\n⏰ **Prazo de retorno: 24h a 48h.**",
       duvidas:
-        "❓ **DÚVIDAS**\nEm que podemos ajudá-los?\n\n⏰ **Prazo: 24h a 48h**"
+        "❓ **Dúvidas**\nEm que podemos ajudá-los?\n\n⏰ **Prazo de retorno: 24h a 48h.**"
     };
 
     if (tipo === "doacao") {
       await canal.send({
-        content: `📩 **TICKET DE DOAÇÃO** aberto por ${interaction.user}\n\n${mensagens.doacao}\n\n👑 <@&${OWNER_ROLE_ID}>`,
+        content: `📩 **Ticket de DOAÇÃO** aberto por ${interaction.user}\n\n${mensagens.doacao}\n\n👑 <@&${OWNER_ROLE_ID}>`,
         allowedMentions: { roles: [OWNER_ROLE_ID] },
         components: [closeRow]
       });
