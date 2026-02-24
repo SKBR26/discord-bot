@@ -46,7 +46,7 @@ function mapTipo(customId) {
 function buildPanelRow() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("denuncia").setLabel("🛑 Denúncia").setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId("doacao").setLabel("💝 Doação").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("doacao").setLabel("💰 Doação").setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId("duvidas").setLabel("❓ Dúvidas").setStyle(ButtonStyle.Primary)
   );
 }
@@ -203,4 +203,5 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 client.login(TOKEN);
+
 
