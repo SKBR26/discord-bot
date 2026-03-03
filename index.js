@@ -36,6 +36,7 @@ function normalizeId(str) {
 
 function mapTipo(customId) {
   const id = normalizeId(customId).replace(/[^a-z0-9_-]/g, "");
+  if (id === "compra") return "doacao";
   if (id.includes("doacao")) return "doacao";
   if (id.includes("denuncia")) return "denuncia";
   if (id.includes("duvida")) return "duvidas";
@@ -52,7 +53,6 @@ function getServerColor(guild) {
 /* ========= PAINEL ========= */
 function buildPanelRow() {
   return new ActionRowBuilder().addComponents(
-
     new ButtonBuilder()
       .setCustomId("denuncia")
       .setLabel("DENÚNCIA")
@@ -71,14 +71,16 @@ function buildPanelRow() {
       .setEmoji("❓")
       .setStyle(ButtonStyle.Primary),
 
+    // ✅ ANIVERSARIANTE VERDE + emoji correto (não usar :birthday:)
     new ButtonBuilder()
       .setCustomId("aniversariante")
       .setLabel("ANIVERSARIANTE")
       .setEmoji("🎂")
-      .setStyle(ButtonStyle.Danger) // cor mais próxima de laranja
+      .setStyle(ButtonStyle.Success)
   );
 }
 
+// ✅ Painel SEM horário e rodapé só "ERA DOS GIGANTES"
 function buildPanelEmbed(guild) {
   return new EmbedBuilder()
     .setDescription("🎫 **Sistema de Tickets**\nSelecione o motivo do atendimento:")
@@ -89,172 +91,206 @@ function buildPanelEmbed(guild) {
     });
 }
 
-/* ========= EMBED DO TICKET ========= */
+/* ========= EMBED DO TICKET (cores por tipo + footer + timestamp) ========= */
 function buildTicketEmbed(guild, tipo, texto) {
-
   const colors = {
-    denuncia: 0xe74c3c,
-    doacao: 0x2ecc71,
-    duvidas: 0x3498db,
-    aniversariante: 0xffa500 // LARANJA
+    denuncia: 0xe74c3c,       // vermelho
+    doacao: 0x2ecc71,         // verde
+    duvidas: 0x3498db,        // azul
+    aniversariante: 0xffa500  // laranja (embed do ticket)
   };
 
   return new EmbedBuilder()
     .setDescription(texto)
     .setColor(colors[tipo] || getServerColor(guild))
     .setFooter({
-      text: guild.name,
+      text: `${guild.name}`,
       iconURL: guild.iconURL?.({ size: 128 }) || undefined
     })
     .setTimestamp();
 }
 
-/* ========= READY ========= */
+/* ========= READY (sem duplicar painel) ========= */
 client.once("ready", async () => {
-
   console.log(`✅ Bot online como ${client.user.tag}`);
 
   const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
   if (!channel) return;
+
+  let painel = null;
+
+  try {
+    const msgs = await channel.messages.fetch({ limit: 50 });
+    painel = msgs.find(m => {
+      if (m.author?.id !== client.user.id) return false;
+      if (!m.components?.length) return false;
+
+      const ids = m.components.flatMap(r => r.components || []).map(c => c.customId);
+      return (
+        ids.includes("denuncia") &&
+        ids.includes("doacao") &&
+        ids.includes("duvidas") &&
+        ids.includes("aniversariante")
+      );
+    });
+  } catch {}
 
   const payload = {
     embeds: [buildPanelEmbed(channel.guild)],
     components: [buildPanelRow()]
   };
 
-  channel.send(payload).catch(() => {});
+  if (painel) {
+    await painel.edit(payload).catch(() => {});
+  } else {
+    await channel.send(payload).catch(() => {});
+  }
 });
 
 /* ================= INTERAÇÕES ================= */
 client.on("interactionCreate", async (interaction) => {
-
   if (!interaction.isButton()) return;
 
+  /* ===== FECHAR ===== */
   if (interaction.customId === CLOSE_ID) {
-
-    await interaction.reply({
-      content: "🔒 Encerrando ticket...",
-      ephemeral: true
-    });
-
-    setTimeout(() => {
-      interaction.channel.delete().catch(() => {});
-    }, 2000);
-
+    if (interaction.channel?.parentId !== CATEGORY_ID) {
+      return interaction.reply({ content: "❌ Este botão só funciona dentro de um ticket.", ephemeral: true });
+    }
+    await interaction.reply({ content: "🔒 Encerrando ticket em 2 segundos...", ephemeral: true });
+    setTimeout(() => interaction.channel.delete().catch(() => {}), 2000);
     return;
   }
 
+  /* ===== COOLDOWN ===== */
   const now = Date.now();
-
   if (now - (cooldown.get(interaction.user.id) || 0) < COOLDOWN_MS) {
-    return interaction.reply({
-      content: "⏳ Aguarde um instante...",
-      ephemeral: true
-    });
+    return interaction.reply({ content: "⏳ Aguarde um instante...", ephemeral: true });
   }
-
   cooldown.set(interaction.user.id, now);
 
   const tipo = mapTipo(interaction.customId);
-
-  if (!tipo) return;
-
-  let nomeCanal = `${tipo}-${interaction.user.username}`
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, "");
-
-  const permissionOverwrites = [
-
-    { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-
-    {
-      id: interaction.user.id,
-      allow: [
-        PermissionsBitField.Flags.ViewChannel,
-        PermissionsBitField.Flags.SendMessages,
-        PermissionsBitField.Flags.ReadMessageHistory
-      ]
-    },
-
-    {
-      id: client.user.id,
-      allow: [
-        PermissionsBitField.Flags.ViewChannel,
-        PermissionsBitField.Flags.SendMessages,
-        PermissionsBitField.Flags.ManageChannels
-      ]
-    }
-  ];
-
-  if (tipo === "doacao" || tipo === "aniversariante") {
-
-    permissionOverwrites.push({
-      id: OWNER_ROLE_ID,
-      allow: [
-        PermissionsBitField.Flags.ViewChannel,
-        PermissionsBitField.Flags.SendMessages
-      ]
-    });
-
-  } else {
-
-    permissionOverwrites.push({
-      id: MOD_ROLE_ID,
-      allow: [
-        PermissionsBitField.Flags.ViewChannel,
-        PermissionsBitField.Flags.SendMessages
-      ]
-    });
-
+  if (!tipo) {
+    return interaction.reply({ content: "❌ Botão inválido.", ephemeral: true });
   }
 
-  const canal = await interaction.guild.channels.create({
-    name: nomeCanal,
-    type: ChannelType.GuildText,
-    parent: CATEGORY_ID,
-    topic: interaction.user.id,
-    permissionOverwrites
-  });
+  if (creating.has(interaction.user.id)) {
+    return interaction.reply({ content: "⏳ Aguarde, estou criando seu ticket...", ephemeral: true });
+  }
+  creating.add(interaction.user.id);
 
-  const mensagens = {
+  try {
+    // ✅ impedir mais de 1 ticket por usuário
+    const allChannels = await interaction.guild.channels.fetch();
+    const jaTem = allChannels.find(
+      c => c.type === ChannelType.GuildText && c.parentId === CATEGORY_ID && c.topic === interaction.user.id
+    );
+    if (jaTem) {
+      return interaction.reply({ content: `❌ Você já tem um ticket aberto: ${jaTem}`, ephemeral: true });
+    }
 
-    denuncia:
-      "🛑 **Denúncia**\nEnvie as provas.\n\n⏰ **Prazo: 24h a 48h**",
+    let nomeCanal = `${tipo}-${interaction.user.username || interaction.user.id}`
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "")
+      .slice(0, 80);
+    if (nomeCanal.length < 3) nomeCanal = `${tipo}-${interaction.user.id}`;
 
-    doacao:
-      "💰 **Doação**\nEnvie o comprovante.\n\n⏰ **Prazo: 24h a 48h**",
+    const permissionOverwrites = [
+      { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+      {
+        id: interaction.user.id,
+        allow: [
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.ReadMessageHistory
+        ]
+      },
+      {
+        id: client.user.id,
+        allow: [
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.ReadMessageHistory,
+          PermissionsBitField.Flags.ManageChannels
+        ]
+      }
+    ];
 
-    duvidas:
-      "❓ **Dúvidas**\nComo podemos ajudar?",
+    // ✅ DOAÇÃO e ANIVERSARIANTE: só OWNER (MOD não vê)
+    if (tipo === "doacao" || tipo === "aniversariante") {
+      permissionOverwrites.push({ id: MOD_ROLE_ID, deny: [PermissionsBitField.Flags.ViewChannel] });
+      permissionOverwrites.push({
+        id: OWNER_ROLE_ID,
+        allow: [
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.ReadMessageHistory
+        ]
+      });
+    } else {
+      // Denúncia / Dúvidas: MOD vê e gerencia
+      permissionOverwrites.push({
+        id: MOD_ROLE_ID,
+        allow: [
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.ReadMessageHistory,
+          PermissionsBitField.Flags.ManageChannels,
+          PermissionsBitField.Flags.ManageMessages
+        ]
+      });
+    }
 
-    aniversariante:
-      "🎂 **Aniversariante**\nEnvie um documento que comprove seu aniversário.\n\n⚠️ **OBS.: Mostrar somente a data de nascimento.**"
-  };
+    const canal = await interaction.guild.channels.create({
+      name: nomeCanal,
+      type: ChannelType.GuildText,
+      parent: CATEGORY_ID,
+      topic: interaction.user.id,
+      permissionOverwrites
+    });
 
-  await canal.send({
+    const closeRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(CLOSE_ID).setLabel("🔒 Encerrar Ticket").setStyle(ButtonStyle.Secondary)
+    );
 
-    content: `📩 Ticket aberto por ${interaction.user}\n\n<@&${OWNER_ROLE_ID}>`,
+    const mensagens = {
+      denuncia:
+        "🛑 **Denúncia**\nEnvie as provas (prints ou vídeo) e descreva o ocorrido por gentileza.\n\n⏰ **Prazo de retorno: 24h a 48h.**",
+      doacao:
+        "💰 **Doação**\nEnvie o comprovante e aguarde o retorno dos Staffs.\n\n⏰ **Prazo de retorno: 24h a 48h.**",
+      duvidas:
+        "❓ **Dúvidas**\nEm que podemos ajudá-los?\n\n⏰ **Prazo de retorno: 24h a 48h.**",
+      aniversariante:
+        "🎂 **Aniversariante**\nEnvie um documento que comprove seu aniversário.\n\n⚠️ **OBS.: Mostrar somente a data de nascimento.**\n\n⏰ **Prazo de retorno: 24h a 48h.**"
+    };
 
-    embeds: [
-      buildTicketEmbed(interaction.guild, tipo, mensagens[tipo])
-    ],
+    // ✅ DOAÇÃO e ANIVERSARIANTE pingam OWNER
+    if (tipo === "doacao" || tipo === "aniversariante") {
+      const titulo = tipo === "doacao" ? "DOAÇÃO" : "ANIVERSARIANTE";
+      await canal.send({
+        content: `📩 **Ticket de ${titulo}** aberto por ${interaction.user}\n\n👑 <@&${OWNER_ROLE_ID}>`,
+        allowedMentions: { roles: [OWNER_ROLE_ID] },
+        embeds: [buildTicketEmbed(interaction.guild, tipo, mensagens[tipo])],
+        components: [closeRow]
+      });
+    } else {
+      await canal.send({
+        content: `📩 Ticket aberto por ${interaction.user}\n\n<@&${MOD_ROLE_ID}>`,
+        allowedMentions: { roles: [MOD_ROLE_ID] },
+        embeds: [buildTicketEmbed(interaction.guild, tipo, mensagens[tipo])],
+        components: [closeRow]
+      });
+    }
 
-    components: [
-      new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(CLOSE_ID)
-          .setLabel("🔒 Encerrar Ticket")
-          .setStyle(ButtonStyle.Secondary)
-      )
-    ]
-
-  });
-
-  await interaction.reply({
-    content: `✅ Ticket criado: ${canal}`,
-    ephemeral: true
-  });
-
+    await interaction.reply({ content: `✅ Seu ticket foi criado: ${canal}`, ephemeral: true });
+  } catch (err) {
+    console.error("Erro ao criar ticket:", err);
+    // se der erro antes de responder
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.reply({ content: "❌ Ocorreu um erro ao criar seu ticket.", ephemeral: true }).catch(() => {});
+    }
+  } finally {
+    creating.delete(interaction.user.id);
+  }
 });
 
 client.login(TOKEN);
