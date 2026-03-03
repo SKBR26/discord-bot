@@ -40,6 +40,7 @@ function mapTipo(customId) {
   if (id.includes("doacao")) return "doacao";
   if (id.includes("denuncia")) return "denuncia";
   if (id.includes("duvida")) return "duvidas";
+  if (id.includes("aniversariante")) return "aniversariante";
   return null;
 }
 
@@ -54,7 +55,8 @@ function buildPanelRow() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("denuncia").setLabel("🛑 DENÚNCIA").setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId("doacao").setLabel("💰 DOAÇÃO").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId("duvidas").setLabel("❓ DÚVIDAS").setStyle(ButtonStyle.Primary)
+    new ButtonBuilder().setCustomId("duvidas").setLabel("❓ DÚVIDAS").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("aniversariante").setLabel(":birthday: ANIVERSARIANTE").setStyle(ButtonStyle.Secondary)
   );
 }
 
@@ -67,7 +69,6 @@ function buildPanelEmbed(guild) {
       text: "ERA DOS GIGANTES",
       iconURL: guild.iconURL?.({ size: 128 }) || undefined
     });
-  // sem .setTimestamp()
 }
 
 /* ========= EMBED DO TICKET (cores por tipo + footer + timestamp) ========= */
@@ -75,7 +76,8 @@ function buildTicketEmbed(guild, tipo, texto) {
   const colors = {
     denuncia: 0xe74c3c, // vermelho
     doacao:   0x2ecc71, // verde
-    duvidas:  0x3498db  // azul
+    duvidas:  0x3498db, // azul
+    aniversariante: 0xf1c40f // amarelo
   };
 
   return new EmbedBuilder()
@@ -103,7 +105,7 @@ client.once("ready", async () => {
       if (!m.components?.length) return false;
 
       const ids = m.components.flatMap(r => r.components || []).map(c => c.customId);
-      return ids.includes("denuncia") && ids.includes("doacao") && ids.includes("duvidas");
+      return ids.includes("denuncia") && ids.includes("doacao") && ids.includes("duvidas") && ids.includes("aniversariante");
     });
   } catch {}
 
@@ -184,7 +186,8 @@ client.on("interactionCreate", async (interaction) => {
       }
     ];
 
-    if (tipo === "doacao") {
+    // ✅ DOAÇÃO e ANIVERSARIANTE: MOD NÃO VÊ, só OWNER
+    if (tipo === "doacao" || tipo === "aniversariante") {
       permissionOverwrites.push({ id: MOD_ROLE_ID, deny: [PermissionsBitField.Flags.ViewChannel] });
       permissionOverwrites.push({
         id: OWNER_ROLE_ID,
@@ -195,6 +198,7 @@ client.on("interactionCreate", async (interaction) => {
         ]
       });
     } else {
+      // Denúncia / Dúvidas: MOD vê e gerencia
       permissionOverwrites.push({
         id: MOD_ROLE_ID,
         allow: [
@@ -219,21 +223,24 @@ client.on("interactionCreate", async (interaction) => {
       new ButtonBuilder().setCustomId(CLOSE_ID).setLabel("🔒 Encerrar Ticket").setStyle(ButtonStyle.Secondary)
     );
 
-    // TEXTOS (mantidos, só 💰 na doação)
     const mensagens = {
       denuncia:
         "🛑 **Denúncia**\nEnvie as provas (prints ou vídeo) e descreva o ocorrido por gentileza.\n\n⏰ **Prazo de retorno: 24h a 48h.**",
       doacao:
         "💰 **Doação**\nEnvie o comprovante e aguarde o retorno dos Staffs.\n\n⏰ **Prazo de retorno: 24h a 48h.**",
       duvidas:
-        "❓ **Dúvidas**\nEm que podemos ajudá-los?\n\n⏰ **Prazo de retorno: 24h a 48h.**"
+        "❓ **Dúvidas**\nEm que podemos ajudá-los?\n\n⏰ **Prazo de retorno: 24h a 48h.**",
+      aniversariante:
+        "🎂 **Aniversariante**\nEnvie seu nick e a data do aniversário (e se tiver, print/comprovação).\n\n⏰ **Prazo de retorno: 24h a 48h.**"
     };
 
-    if (tipo === "doacao") {
+    // ✅ DOAÇÃO e ANIVERSARIANTE pingam OWNER e não pingam MOD
+    if (tipo === "doacao" || tipo === "aniversariante") {
+      const titulo = tipo === "doacao" ? "DOAÇÃO" : "ANIVERSARIANTE";
       await canal.send({
-        content: `📩 **Ticket de DOAÇÃO** aberto por ${interaction.user}\n\n👑 <@&${OWNER_ROLE_ID}>`,
+        content: `📩 **Ticket de ${titulo}** aberto por ${interaction.user}\n\n👑 <@&${OWNER_ROLE_ID}>`,
         allowedMentions: { roles: [OWNER_ROLE_ID] },
-        embeds: [buildTicketEmbed(interaction.guild, "doacao", mensagens.doacao)],
+        embeds: [buildTicketEmbed(interaction.guild, tipo, mensagens[tipo])],
         components: [closeRow]
       });
     } else {
@@ -252,4 +259,3 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 client.login(TOKEN);
-
