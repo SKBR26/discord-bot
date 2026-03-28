@@ -21,6 +21,9 @@ const CHANNEL_ID  = "1474948831882772500";
 const MOD_ROLE_ID = "1474961654793109726";
 const OWNER_ROLE_ID = "1401261879292198978";
 const TOKEN = process.env.TOKEN;
+
+/* ✅ CANAL DO AVISO */
+const AVISO_CHANNEL_ID = "1402243860410667130";
 /* ========================================== */
 
 const CLOSE_ID = "ticket_close";
@@ -28,10 +31,15 @@ const creating = new Set();
 const cooldown = new Map();
 const COOLDOWN_MS = 2500;
 
-/* ========= AVISO AUTOMÁTICO ========= */
-function enviarAviso() {
-  const canal = client.channels.cache.get("1402699273715322980");
-  if (!canal) return;
+/* ========= 🔔 AVISO AUTOMÁTICO ========= */
+async function enviarAviso() {
+  console.log("⏰ Tentando enviar aviso...");
+
+  const canal = await client.channels.fetch(AVISO_CHANNEL_ID).catch(() => null);
+
+  if (!canal) {
+    return console.log("❌ Canal NÃO encontrado");
+  }
 
   const embed = new EmbedBuilder()
     .setColor("#5865F2")
@@ -50,6 +58,8 @@ function enviarAviso() {
     .setTimestamp();
 
   canal.send({ embeds: [embed] });
+
+  console.log("✅ Aviso enviado com sucesso!");
 }
 
 /* ========= helpers ========= */
@@ -151,10 +161,12 @@ client.once("ready", async () => {
     await channel.send(payload).catch(() => {});
   }
 
-  // ✅ ENVIA UMA VEZ AO LIGAR
-  enviarAviso();
+  // 🔥 TESTE: envia 5s após ligar
+  setTimeout(() => {
+    enviarAviso();
+  }, 5000);
 
-  // ⏰ DEPOIS SEGUE A CADA 1H
+  // ⏰ automático a cada 1h
   cron.schedule("0 * * * *", () => {
     enviarAviso();
   });
@@ -185,36 +197,21 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   if (creating.has(interaction.user.id)) {
-    return interaction.reply({ content: "⏳ Aguarde, criando seu ticket...", ephemeral: true });
+    return interaction.reply({ content: "⏳ Criando seu ticket...", ephemeral: true });
   }
   creating.add(interaction.user.id);
 
   try {
-    const allChannels = await interaction.guild.channels.fetch();
-    const jaTem = allChannels.find(
-      c => c.type === ChannelType.GuildText && c.parentId === CATEGORY_ID && c.topic === interaction.user.id
-    );
-    if (jaTem) {
-      return interaction.reply({ content: `❌ Você já tem um ticket aberto: ${jaTem}`, ephemeral: true });
-    }
-
-    let nomeCanal = `${tipo}-${interaction.user.username || interaction.user.id}`
-      .toLowerCase()
-      .replace(/[^a-z0-9-]/g, "")
-      .slice(0, 80);
-
-    if (nomeCanal.length < 3) nomeCanal = `${tipo}-${interaction.user.id}`;
-
     const canal = await interaction.guild.channels.create({
-      name: nomeCanal,
+      name: `${tipo}-${interaction.user.username}`.toLowerCase(),
       type: ChannelType.GuildText,
       parent: CATEGORY_ID,
       topic: interaction.user.id
     });
 
     await canal.send({
-      content: `<@&${tipo === "doacao" || tipo === "aniversariante" ? OWNER_ROLE_ID : MOD_ROLE_ID}>`,
-      embeds: [buildTicketEmbed(interaction.guild, tipo, "Ticket criado com sucesso!")],
+      content: `<@&${MOD_ROLE_ID}>`,
+      embeds: [buildTicketEmbed(interaction.guild, tipo, "Ticket criado com sucesso!")]
     });
 
     await interaction.reply({ content: `✅ Ticket criado: ${canal}`, ephemeral: true });
