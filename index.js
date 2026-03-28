@@ -28,6 +28,30 @@ const creating = new Set();
 const cooldown = new Map();
 const COOLDOWN_MS = 2500;
 
+/* ========= AVISO AUTOMÁTICO ========= */
+function enviarAviso() {
+  const canal = client.channels.cache.get("1402699273715322980");
+  if (!canal) return;
+
+  const embed = new EmbedBuilder()
+    .setColor("#5865F2")
+    .setTitle("📢 Aviso do Servidor")
+    .setDescription(
+      "👋 Olá, pessoal!\n\n" +
+      "📜 **Leiam as regras:** <#1401282829106811055>\n" +
+      "💎 **Confiram os valores de apoio ao servidor**\n\n" +
+      "🤝 Contamos com a colaboração de todos!"
+    )
+    .addFields({
+      name: "📌 Importante",
+      value: "O não cumprimento das regras pode resultar em punições."
+    })
+    .setFooter({ text: "Mensagem automática • A cada 1 hora" })
+    .setTimestamp();
+
+  canal.send({ embeds: [embed] });
+}
+
 /* ========= helpers ========= */
 function normalizeId(str) {
   return String(str || "")
@@ -127,28 +151,12 @@ client.once("ready", async () => {
     await channel.send(payload).catch(() => {});
   }
 
-  /* ========= 🔔 AVISO AUTOMÁTICO ========= */
+  // ✅ ENVIA UMA VEZ AO LIGAR
+  enviarAviso();
+
+  // ⏰ DEPOIS SEGUE A CADA 1H
   cron.schedule("0 * * * *", () => {
-    const canal = client.channels.cache.get("1402699273715322980");
-    if (!canal) return;
-
-    const embed = new EmbedBuilder()
-      .setColor("#5865F2")
-      .setTitle("📢 Aviso do Servidor")
-      .setDescription(
-        "👋 Olá, pessoal!\n\n" +
-        "📜 **Leiam as regras:** <#1401282829106811055>\n" +
-        "💎 **Confiram os valores de apoio ao servidor**\n\n" +
-        "🤝 Contamos com a colaboração de todos!"
-      )
-      .addFields({
-        name: "📌 Importante",
-        value: "O não cumprimento das regras pode resultar em punições."
-      })
-      .setFooter({ text: "Mensagem automática • A cada 1 hora" })
-      .setTimestamp();
-
-    canal.send({ embeds: [embed] });
+    enviarAviso();
   });
 });
 
@@ -177,7 +185,7 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   if (creating.has(interaction.user.id)) {
-    return interaction.reply({ content: "⏳ Aguarde, estou criando seu ticket...", ephemeral: true });
+    return interaction.reply({ content: "⏳ Aguarde, criando seu ticket...", ephemeral: true });
   }
   creating.add(interaction.user.id);
 
@@ -197,73 +205,16 @@ client.on("interactionCreate", async (interaction) => {
 
     if (nomeCanal.length < 3) nomeCanal = `${tipo}-${interaction.user.id}`;
 
-    const permissionOverwrites = [
-      { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-      {
-        id: interaction.user.id,
-        allow: [
-          PermissionsBitField.Flags.ViewChannel,
-          PermissionsBitField.Flags.SendMessages,
-          PermissionsBitField.Flags.ReadMessageHistory
-        ]
-      },
-      {
-        id: client.user.id,
-        allow: [
-          PermissionsBitField.Flags.ViewChannel,
-          PermissionsBitField.Flags.SendMessages,
-          PermissionsBitField.Flags.ReadMessageHistory,
-          PermissionsBitField.Flags.ManageChannels
-        ]
-      }
-    ];
-
-    if (tipo === "doacao" || tipo === "aniversariante") {
-      permissionOverwrites.push({ id: MOD_ROLE_ID, deny: [PermissionsBitField.Flags.ViewChannel] });
-      permissionOverwrites.push({
-        id: OWNER_ROLE_ID,
-        allow: [
-          PermissionsBitField.Flags.ViewChannel,
-          PermissionsBitField.Flags.SendMessages,
-          PermissionsBitField.Flags.ReadMessageHistory
-        ]
-      });
-    } else {
-      permissionOverwrites.push({
-        id: MOD_ROLE_ID,
-        allow: [
-          PermissionsBitField.Flags.ViewChannel,
-          PermissionsBitField.Flags.SendMessages,
-          PermissionsBitField.Flags.ReadMessageHistory,
-          PermissionsBitField.Flags.ManageChannels,
-          PermissionsBitField.Flags.ManageMessages
-        ]
-      });
-    }
-
     const canal = await interaction.guild.channels.create({
       name: nomeCanal,
       type: ChannelType.GuildText,
       parent: CATEGORY_ID,
-      topic: interaction.user.id,
-      permissionOverwrites
+      topic: interaction.user.id
     });
-
-    const closeRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(CLOSE_ID).setLabel("🔒 Encerrar Ticket").setStyle(ButtonStyle.Secondary)
-    );
-
-    const mensagens = {
-      denuncia: "🛑 **Denúncia**\nEnvie as provas.\n\n⏰ Prazo: 24h a 48h.",
-      doacao: "💰 **Doação**\nEnvie o comprovante.\n\n⏰ Prazo: 24h a 48h.",
-      duvidas: "❓ **Dúvidas**\nComo podemos ajudar?\n\n⏰ Prazo: 24h a 48h.",
-      aniversariante: "🎂 **Aniversariante**\nEnvie documento com a data.\n\n⏰ Prazo: 24h a 48h."
-    };
 
     await canal.send({
       content: `<@&${tipo === "doacao" || tipo === "aniversariante" ? OWNER_ROLE_ID : MOD_ROLE_ID}>`,
-      embeds: [buildTicketEmbed(interaction.guild, tipo, mensagens[tipo])],
-      components: [closeRow]
+      embeds: [buildTicketEmbed(interaction.guild, tipo, "Ticket criado com sucesso!")],
     });
 
     await interaction.reply({ content: `✅ Ticket criado: ${canal}`, ephemeral: true });
