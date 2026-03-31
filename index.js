@@ -119,7 +119,7 @@ function buildTicketControls(claimed = false, claimedBy = null) {
 /* ========= EMBED DO PAINEL ========= */
 function buildPanelEmbed(guild) {
   return new EmbedBuilder()
-    .setTitle("🎫 Central de Atendimento")
+    .setTitle("🎫 Sistema de Tickets")
     .setDescription(
       "Selecione o motivo do atendimento no **ERA DOS GIGANTES**."
     )
