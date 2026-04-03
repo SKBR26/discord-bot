@@ -50,6 +50,16 @@ function getServerColor(guild) {
   return botMember?.roles?.highest?.color || 0x57F287;
 }
 
+function canManageTicket(member, tipo) {
+  if (!member) return false;
+
+  if (tipo === "doacao" || tipo === "aniversariante") {
+    return member.roles.cache.has(OWNER_ROLE_ID);
+  }
+
+  return member.roles.cache.has(MOD_ROLE_ID);
+}
+
 function getTicketTipoFromChannelName(channelName = "") {
   const name = normalizeId(channelName);
   if (name.startsWith("denuncia-")) return "denuncia";
@@ -59,22 +69,36 @@ function getTicketTipoFromChannelName(channelName = "") {
   return null;
 }
 
-/* 🔒 AGORA SOMENTE MOD PODE GERENCIAR */
-function canCloseTicket(member) {
-  if (!member) return false;
-  return member.roles.cache.has(MOD_ROLE_ID);
-}
-
-/* ========= BOTÕES ========= */
+/* ========= BOTÕES DO PAINEL ========= */
 function buildPanelRow() {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("denuncia").setLabel("DENÚNCIA").setEmoji("🛑").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("doacao").setLabel("DOAÇÃO").setEmoji("💰").setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId("duvidas").setLabel("DÚVIDAS").setEmoji("❓").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("aniversariante").setLabel("ANIVERSARIANTE").setEmoji("🎂").setStyle(ButtonStyle.Success)
+    new ButtonBuilder()
+      .setCustomId("denuncia")
+      .setLabel("DENÚNCIA")
+      .setEmoji("🛑")
+      .setStyle(ButtonStyle.Secondary),
+
+    new ButtonBuilder()
+      .setCustomId("doacao")
+      .setLabel("DOAÇÃO")
+      .setEmoji("💰")
+      .setStyle(ButtonStyle.Danger),
+
+    new ButtonBuilder()
+      .setCustomId("duvidas")
+      .setLabel("DÚVIDAS")
+      .setEmoji("❓")
+      .setStyle(ButtonStyle.Primary),
+
+    new ButtonBuilder()
+      .setCustomId("aniversariante")
+      .setLabel("ANIVERSARIANTE")
+      .setEmoji("🎂")
+      .setStyle(ButtonStyle.Success)
   );
 }
 
+/* ========= BOTÕES DENTRO DO TICKET ========= */
 function buildTicketControls(claimed = false, claimedBy = null) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -92,10 +116,13 @@ function buildTicketControls(claimed = false, claimedBy = null) {
   );
 }
 
+/* ========= EMBED DO PAINEL ========= */
 function buildPanelEmbed(guild) {
   return new EmbedBuilder()
     .setTitle("🎫 Sistema de Tickets")
-    .setDescription("Selecione o motivo do atendimento no **ERA DOS GIGANTES**.")
+    .setDescription(
+      "Selecione o motivo do atendimento no **ERA DOS GIGANTES**."
+    )
     .setColor(0x57F287)
     .setFooter({
       text: "ERA DOS GIGANTES",
@@ -103,6 +130,7 @@ function buildPanelEmbed(guild) {
     });
 }
 
+/* ========= EMBED DO TICKET ========= */
 function buildTicketEmbed(guild, tipo, texto) {
   const colors = {
     denuncia: 0x95a5a6,
@@ -128,19 +156,88 @@ client.once("ready", async () => {
   const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
   if (!channel) return;
 
+  let painel = null;
+
+  try {
+    const msgs = await channel.messages.fetch({ limit: 50 });
+    painel = msgs.find(m => {
+      if (m.author?.id !== client.user.id) return false;
+      if (!m.components?.length) return false;
+
+      const ids = m.components.flatMap(r => r.components || []).map(c => c.customId);
+      return (
+        ids.includes("denuncia") &&
+        ids.includes("doacao") &&
+        ids.includes("duvidas") &&
+        ids.includes("aniversariante")
+      );
+    });
+  } catch {}
+
   const payload = {
     embeds: [buildPanelEmbed(channel.guild)],
     components: [buildPanelRow()]
   };
 
-  await channel.send(payload).catch(() => {});
+  if (painel) {
+    await painel.edit(payload).catch(() => {});
+  } else {
+    await channel.send(payload).catch(() => {});
+  }
 });
 
 /* ================= INTERAÇÕES ================= */
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
 
-  /* ===== FECHAR (AGORA COM PERMISSÃO) ===== */
+  /* ===== ASSUMIR TICKET ===== */
+  if (interaction.customId === CLAIM_ID) {
+    if (interaction.channel?.parentId !== CATEGORY_ID) {
+      return interaction.reply({
+        content: "❌ Este botão só funciona dentro de um ticket.",
+        ephemeral: true
+      });
+    }
+
+    const tipo = getTicketTipoFromChannelName(interaction.channel.name);
+    if (!tipo) {
+      return interaction.reply({
+        content: "❌ Não foi possível identificar o tipo deste ticket.",
+        ephemeral: true
+      });
+    }
+
+    if (!canManageTicket(interaction.member, tipo)) {
+      return interaction.reply({
+        content: "❌ Você não tem permissão para assumir este ticket.",
+        ephemeral: true
+      });
+    }
+
+    const row = interaction.message.components?.[0];
+    const alreadyClaimed = row?.components?.some(
+      c => c.customId === CLAIM_ID && c.disabled
+    );
+
+    if (alreadyClaimed) {
+      return interaction.reply({
+        content: "❌ Este ticket já foi assumido.",
+        ephemeral: true
+      });
+    }
+
+    await interaction.update({
+      components: [buildTicketControls(true, interaction.user.username)]
+    });
+
+    await interaction.channel.send({
+      content: `✅ ${interaction.user} assumiu este ticket.`
+    });
+
+    return;
+  }
+
+  /* ===== FECHAR (ALTERADO) ===== */
   if (interaction.customId === CLOSE_ID) {
     if (interaction.channel?.parentId !== CATEGORY_ID) {
       return interaction.reply({
@@ -149,7 +246,8 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    if (!canCloseTicket(interaction.member)) {
+    // 🔒 SOMENTE MODERAÇÃO
+    if (!interaction.member.roles.cache.has(MOD_ROLE_ID)) {
       return interaction.reply({
         content: "❌ Apenas a moderação pode encerrar este ticket.",
         ephemeral: true
@@ -165,8 +263,7 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
-  /* ===== RESTANTE DO CÓDIGO NORMAL ===== */
-
+  /* ===== COOLDOWN ===== */
   const now = Date.now();
   if (now - (cooldown.get(interaction.user.id) || 0) < COOLDOWN_MS) {
     return interaction.reply({
@@ -177,11 +274,16 @@ client.on("interactionCreate", async (interaction) => {
   cooldown.set(interaction.user.id, now);
 
   const tipo = mapTipo(interaction.customId);
-  if (!tipo) return;
+  if (!tipo) {
+    return interaction.reply({
+      content: "❌ Botão inválido.",
+      ephemeral: true
+    });
+  }
 
   if (creating.has(interaction.user.id)) {
     return interaction.reply({
-      content: "⏳ Criando seu ticket...",
+      content: "⏳ Aguarde, estou criando seu ticket...",
       ephemeral: true
     });
   }
@@ -189,30 +291,123 @@ client.on("interactionCreate", async (interaction) => {
   creating.add(interaction.user.id);
 
   try {
+    const allChannels = await interaction.guild.channels.fetch();
+    const jaTem = allChannels.find(
+      c => c.type === ChannelType.GuildText && c.parentId === CATEGORY_ID && c.topic === interaction.user.id
+    );
+
+    if (jaTem) {
+      return interaction.reply({
+        content: `❌ Você já tem um ticket aberto: ${jaTem}`,
+        ephemeral: true
+      });
+    }
+
+    let nomeCanal = `${tipo}-${interaction.user.username || interaction.user.id}`
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "")
+      .slice(0, 80);
+
+    if (nomeCanal.length < 3) nomeCanal = `${tipo}-${interaction.user.id}`;
+
+    const permissionOverwrites = [
+      { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+      {
+        id: interaction.user.id,
+        allow: [
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.ReadMessageHistory
+        ]
+      },
+      {
+        id: client.user.id,
+        allow: [
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.ReadMessageHistory,
+          PermissionsBitField.Flags.ManageChannels
+        ]
+      }
+    ];
+
+    if (tipo === "doacao" || tipo === "aniversariante") {
+      permissionOverwrites.push({
+        id: MOD_ROLE_ID,
+        deny: [PermissionsBitField.Flags.ViewChannel]
+      });
+
+      permissionOverwrites.push({
+        id: OWNER_ROLE_ID,
+        allow: [
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.ReadMessageHistory
+        ]
+      });
+    } else {
+      permissionOverwrites.push({
+        id: MOD_ROLE_ID,
+        allow: [
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.ReadMessageHistory,
+          PermissionsBitField.Flags.ManageChannels,
+          PermissionsBitField.Flags.ManageMessages
+        ]
+      });
+    }
+
     const canal = await interaction.guild.channels.create({
-      name: `${tipo}-${interaction.user.username}`,
+      name: nomeCanal,
       type: ChannelType.GuildText,
       parent: CATEGORY_ID,
       topic: interaction.user.id,
-      permissionOverwrites: [
-        { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-        { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
-        { id: MOD_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
-      ]
+      permissionOverwrites
     });
 
-    await canal.send({
-      content: `📩 Ticket aberto por ${interaction.user}`,
-      components: [buildTicketControls()]
-    });
+    const mensagens = {
+      denuncia:
+        "🛑 **Denúncia**\nEnvie as provas (prints ou vídeo) e descreva o ocorrido.\n\n⏰ **Prazo de retorno: 24h a 48h.**",
+      doacao:
+        "💰 **Doação**\nEnvie o comprovante.\n\n⏰ **Prazo de retorno: 24h a 48h.**",
+      duvidas:
+        "❓ **Dúvidas**\nEm que podemos ajudá-lo?\n\n⏰ **Prazo de retorno: 24h a 48h.**",
+      aniversariante:
+        "🎂 **Aniversariante**\nEnvie um documento que comprove seu aniversário.\n\n⚠️ **OBS.: Mostrar somente a data de nascimento.**\n\n⏰ **Prazo de retorno: 24h a 48h.**"
+    };
+
+    if (tipo === "doacao" || tipo === "aniversariante") {
+      const titulo = tipo === "doacao" ? "DOAÇÃO" : "ANIVERSARIANTE";
+
+      await canal.send({
+        content: `📩 **Ticket de ${titulo}** aberto por ${interaction.user}\n\n👑 <@&${OWNER_ROLE_ID}>`,
+        allowedMentions: { roles: [OWNER_ROLE_ID] },
+        embeds: [buildTicketEmbed(interaction.guild, tipo, mensagens[tipo])],
+        components: [buildTicketControls()]
+      });
+    } else {
+      await canal.send({
+        content: `📩 Ticket aberto por ${interaction.user}\n\n<@&${MOD_ROLE_ID}>`,
+        allowedMentions: { roles: [MOD_ROLE_ID] },
+        embeds: [buildTicketEmbed(interaction.guild, tipo, mensagens[tipo])],
+        components: [buildTicketControls()]
+      });
+    }
 
     await interaction.reply({
-      content: `✅ Ticket criado: ${canal}`,
+      content: `✅ Seu ticket foi criado: ${canal}`,
       ephemeral: true
     });
-
   } catch (err) {
-    console.error(err);
+    console.error("Erro ao criar ticket:", err);
+
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.reply({
+        content: "❌ Ocorreu um erro ao criar seu ticket.",
+        ephemeral: true
+      }).catch(() => {});
+    }
   } finally {
     creating.delete(interaction.user.id);
   }
