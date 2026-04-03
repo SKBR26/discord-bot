@@ -190,28 +190,18 @@ client.once("ready", async () => {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
 
-  /* ===== ASSUMIR TICKET ===== */
   if (interaction.customId === CLAIM_ID) {
     if (interaction.channel?.parentId !== CATEGORY_ID) {
-      return interaction.reply({
-        content: "❌ Este botão só funciona dentro de um ticket.",
-        ephemeral: true
-      });
+      return interaction.reply({ content: "❌ Este botão só funciona dentro de um ticket.", ephemeral: true });
     }
 
     const tipo = getTicketTipoFromChannelName(interaction.channel.name);
     if (!tipo) {
-      return interaction.reply({
-        content: "❌ Não foi possível identificar o tipo deste ticket.",
-        ephemeral: true
-      });
+      return interaction.reply({ content: "❌ Não foi possível identificar o tipo deste ticket.", ephemeral: true });
     }
 
     if (!canManageTicket(interaction.member, tipo)) {
-      return interaction.reply({
-        content: "❌ Você não tem permissão para assumir este ticket.",
-        ephemeral: true
-      });
+      return interaction.reply({ content: "❌ Você não tem permissão para assumir este ticket.", ephemeral: true });
     }
 
     const row = interaction.message.components?.[0];
@@ -220,10 +210,7 @@ client.on("interactionCreate", async (interaction) => {
     );
 
     if (alreadyClaimed) {
-      return interaction.reply({
-        content: "❌ Este ticket já foi assumido.",
-        ephemeral: true
-      });
+      return interaction.reply({ content: "❌ Este ticket já foi assumido.", ephemeral: true });
     }
 
     await interaction.update({
@@ -237,21 +224,13 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
-  /* ===== FECHAR (ALTERADO) ===== */
   if (interaction.customId === CLOSE_ID) {
     if (interaction.channel?.parentId !== CATEGORY_ID) {
-      return interaction.reply({
-        content: "❌ Este botão só funciona dentro de um ticket.",
-        ephemeral: true
-      });
+      return interaction.reply({ content: "❌ Este botão só funciona dentro de um ticket.", ephemeral: true });
     }
 
-    // 🔒 SOMENTE MODERAÇÃO
     if (!interaction.member.roles.cache.has(MOD_ROLE_ID)) {
-      return interaction.reply({
-        content: "❌ Apenas a moderação pode encerrar este ticket.",
-        ephemeral: true
-      });
+      return interaction.reply({ content: "❌ Apenas a moderação pode encerrar este ticket.", ephemeral: true });
     }
 
     await interaction.reply({
@@ -263,29 +242,19 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
-  /* ===== COOLDOWN ===== */
   const now = Date.now();
   if (now - (cooldown.get(interaction.user.id) || 0) < COOLDOWN_MS) {
-    return interaction.reply({
-      content: "⏳ Aguarde um instante...",
-      ephemeral: true
-    });
+    return interaction.reply({ content: "⏳ Aguarde um instante...", ephemeral: true });
   }
   cooldown.set(interaction.user.id, now);
 
   const tipo = mapTipo(interaction.customId);
   if (!tipo) {
-    return interaction.reply({
-      content: "❌ Botão inválido.",
-      ephemeral: true
-    });
+    return interaction.reply({ content: "❌ Botão inválido.", ephemeral: true });
   }
 
   if (creating.has(interaction.user.id)) {
-    return interaction.reply({
-      content: "⏳ Aguarde, estou criando seu ticket...",
-      ephemeral: true
-    });
+    return interaction.reply({ content: "⏳ Aguarde, estou criando seu ticket...", ephemeral: true });
   }
 
   creating.add(interaction.user.id);
@@ -368,13 +337,13 @@ client.on("interactionCreate", async (interaction) => {
 
     const mensagens = {
       denuncia:
-        "🛑 **Denúncia**\nEnvie as provas (prints ou vídeo) e descreva o ocorrido.\n\n⏰ **Prazo de retorno: 24h a 48h.**",
+        "🛑 **Denúncia**\nEnvie as provas (prints ou vídeo) e descreva o ocorrido.\n\n⏰ **Prazo de retorno: 24h até 48h.**",
       doacao:
-        "💰 **Doação**\nEnvie o comprovante.\n\n⏰ **Prazo de retorno: 24h a 48h.**",
+        "💰 **Doação**\nEnvie o comprovante.\n\n⏰ **Prazo de retorno: 24h até 48h.**",
       duvidas:
-        "❓ **Dúvidas**\nEm que podemos ajudá-lo?\n\n⏰ **Prazo de retorno: 24h a 48h.**",
+        "❓ **Dúvidas**\nEm que podemos ajudá-lo?\n\n⏰ **Prazo de retorno: 24h até 48h.**",
       aniversariante:
-        "🎂 **Aniversariante**\nEnvie um documento que comprove seu aniversário.\n\n⚠️ **OBS.: Mostrar somente a data de nascimento.**\n\n⏰ **Prazo de retorno: 24h a 48h.**"
+        "🎂 **Aniversariante**\nEnvie um documento que comprove seu aniversário.\n\n⚠️ **OBS.: Mostrar somente a data de nascimento.**\n\n⏰ **Prazo de retorno: 24h até 48h.**"
     };
 
     if (tipo === "doacao" || tipo === "aniversariante") {
